@@ -1,0 +1,46 @@
+[workspace]
+resolver = "3"
+members = ["crates/duet-core", "crates/duet-cli", "crates/duet-benchgen", "crates/duet-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+authors = ["ball46"]
+repository = "https://github.com/ball46/duet"
+description = "Compare folders and files: text, tables, pictures and bytes. Fast and offline."
+
+[workspace.dependencies]
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
+gpui-kit = "=0.7.3"
+# Same crate gpui-kit already uses; listed directly only to switch on tree-sitter grammars.
+gpui-component = { version = "=0.7.3", default-features = false }
+tree-sitter = "=0.26.13"
+tree-sitter-powershell = "=0.26.4"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std"] }
+duet-core = { path = "crates/duet-core" }
+chardetng = "1.0.0"
+clap = { version = "4.6.7", features = ["derive"] }
+criterion = "0.8.2"
+encoding_rs = "0.8.42"
+globset = "0.4.20"
+ignore = "0.4.33"
+imara-diff = { version = "0.2.0", default-features = false }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp", "ico", "webp", "tiff"] }
+resvg = { version = "0.46.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts", "raster-images"] }
+memchr = "2.8.3"
+memmap2 = "0.9.11"
+crc32fast = "1.5.2"
+proptest = "1.12.0"
+regex = "1.13.1"
+rayon = "1.12.0"
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+trash = "5.2.9"
+unicode-segmentation = "1.13.3"
+
+[profile.release]
+lto = "thin"

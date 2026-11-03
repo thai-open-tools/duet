@@ -1,0 +1,25 @@
+pub mod align;
+pub mod caret;
+pub mod display;
+pub mod editing;
+pub mod find;
+pub mod goto;
+pub mod job;
+pub mod menu;
+pub mod model;
+pub mod moving;
+pub mod overview;
+pub mod prefs;
+pub mod reformat;
+pub mod replace;
+pub mod report;
+pub mod rowsel;
+pub mod saving;
+pub mod sides;
+pub mod syntax;
+#[cfg(test)]
+pub(crate) mod testing;
+pub mod undo;
+pub mod view;
+pub mod warnings;
+pub mod watch;

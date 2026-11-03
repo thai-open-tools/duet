@@ -1,0 +1,46 @@
+[graph]
+all-features = false
+# duet ships for Windows only; other targets' optional dependencies (macOS/Linux/web
+# backends, wasm-only reqwest) are not in the shipped binary.
+targets = ["x86_64-pc-windows-msvc"]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    { crate = "reqwest", reason = "duet runs offline: no network client allowed" },
+    { crate = "zed-reqwest", reason = "duet runs offline: no network client allowed" },
+    { crate = "hyper", reason = "duet runs offline: no network client allowed" },
+    { crate = "ureq", reason = "duet runs offline: no network client allowed" },
+    { crate = "isahc", reason = "duet runs offline: no network client allowed" },
+    { crate = "curl", reason = "duet runs offline: no network client allowed" },
+    { crate = "surf", reason = "duet runs offline: no network client allowed" },
+    { crate = "attohttpc", reason = "duet runs offline: no network client allowed" },
+    { crate = "gpui-pre-reqwest", reason = "duet runs offline: no network client allowed" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    "0BSD",
+]
+# option-ext is MPL-2.0 (file-level copyleft), used unmodified by dirs-sys at build time
+# through rust-embed's proc-macro; no duet code is MPL-covered.
+exceptions = [{ allow = ["MPL-2.0"], crate = "option-ext" }]
+private = { ignore = true }
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

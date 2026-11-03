@@ -1,0 +1,7 @@
+# The C runtime is linked into the binaries, so duet.exe and duet-cli.exe start on a Windows PC
+# that never installed the Visual C++ Redistributable (no VCRUNTIME140.dll needed).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

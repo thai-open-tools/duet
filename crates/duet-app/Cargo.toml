@@ -1,0 +1,42 @@
+[package]
+name = "duet-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "duet_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "duet"
+path = "src/main.rs"
+
+[dependencies]
+duet-core.workspace = true
+chrono.workspace = true
+encoding_rs.workspace = true
+gpui-kit.workspace = true
+image.workspace = true
+gpui-component = { workspace = true, features = [
+    "tree-sitter-rust", "tree-sitter-typescript", "tree-sitter-tsx", "tree-sitter-javascript",
+    "tree-sitter-python", "tree-sitter-go", "tree-sitter-java", "tree-sitter-c", "tree-sitter-cpp",
+    "tree-sitter-csharp", "tree-sitter-yaml", "tree-sitter-toml", "tree-sitter-html",
+    "tree-sitter-css", "tree-sitter-sql", "tree-sitter-markdown", "tree-sitter-markdown-inline",
+    "tree-sitter-bash",
+] }
+regex.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tree-sitter.workspace = true
+tree-sitter-powershell.workspace = true
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true

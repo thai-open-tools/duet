@@ -1,0 +1,87 @@
+name: "🐞 Bug report · แจ้งบั๊ก"
+description: "Something is wrong, crashes or looks broken. · มีอะไรทำงานผิด โปรแกรมปิดเอง หรือหน้าจอแสดงผิด"
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time. Write in **English or Thai**, whichever is easier.
+        **Remove passwords, keys and private data** from anything you paste or attach.
+
+        ขอบคุณที่ช่วยแจ้ง เขียนเป็น **ภาษาไทยหรืออังกฤษ** ก็ได้
+        **ลบรหัสผ่าน คีย์ และข้อมูลส่วนตัวออก** จากสิ่งที่วางหรือแนบก่อนส่ง
+
+  - type: textarea
+    id: what
+    attributes:
+      label: "What happened? · เกิดอะไรขึ้น"
+      description: "What did you see? Paste the exact message if there was one. · เห็นอะไร ถ้ามีข้อความขึ้น ให้วางข้อความนั้นมาด้วย"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Steps to make it happen again · ขั้นตอนที่ทำให้เกิดซ้ำ"
+      placeholder: |
+        1. Open two folders ... · เปิดสองโฟลเดอร์ ...
+        2. Choose Content ... · เลือก Content ...
+        3. Press F5 ... · กด F5 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "What did you expect? · คิดว่าควรเป็นอย่างไร"
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: "Which part of duet? · เกิดที่ส่วนไหน"
+      options:
+        - "Start tab · หน้าเริ่มต้น"
+        - "Folder compare · เทียบโฟลเดอร์"
+        - "Copy, delete or sync · คัดลอก ลบ หรือซิงก์"
+        - "Folder report · รายงานผลเทียบโฟลเดอร์"
+        - "Text compare or editing · เทียบหรือแก้ไขข้อความ"
+        - "3-way merge · รวมสามทาง"
+        - "Table compare (CSV, TSV) · เทียบตาราง"
+        - "Picture compare · เทียบรูปภาพ"
+        - "Hex · เทียบแบบ Hex"
+        - "Help guide · คู่มือในโปรแกรม"
+        - "Installer or uninstall · ตัวติดตั้งหรือการถอนการติดตั้ง"
+        - "duet-cli (command line) · ใช้ผ่าน command line"
+        - "Something else · อื่นๆ"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: "duet version · เวอร์ชันของ duet"
+      description: "Settings › Apps › duet, the name of the file you downloaded, or duet.exe › Properties › Details. · ดูได้ที่ Settings › Apps › duet จากชื่อไฟล์ที่ดาวน์โหลด หรือคลิกขวาที่ duet.exe › Properties › Details"
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: "Windows version · เวอร์ชันของ Windows"
+      description: "Press Win+R, type winver, press Enter. · กด Win+R พิมพ์ winver แล้วกด Enter"
+      placeholder: "Windows 11 24H2"
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: "Screenshots or small sample files · ภาพหน้าจอหรือไฟล์ตัวอย่างขนาดเล็ก"
+      description: "Drag them into this box. Two small files that show the problem help the most. · ลากใส่ช่องนี้ได้เลย ไฟล์เล็กๆ สองไฟล์ที่ทำให้เห็นปัญหาช่วยได้มากที่สุด"
+
+  - type: textarea
+    id: crash
+    attributes:
+      label: "Crash report (if duet closed by itself) · รายงานตอนโปรแกรมปิดเอง (ถ้ามี)"
+      description: "Open %LOCALAPPDATA%\\duet\\logs and paste the newest crash-….txt here. · เปิดโฟลเดอร์ %LOCALAPPDATA%\\duet\\logs แล้ววางเนื้อหาไฟล์ crash-….txt ล่าสุด"
+      render: text

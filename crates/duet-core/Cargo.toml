@@ -1,0 +1,41 @@
+[package]
+name = "duet-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+chardetng.workspace = true
+encoding_rs.workspace = true
+memchr.workspace = true
+memmap2.workspace = true
+imara-diff.workspace = true
+unicode-segmentation.workspace = true
+tempfile.workspace = true
+ignore.workspace = true
+globset.workspace = true
+rayon.workspace = true
+trash.workspace = true
+image.workspace = true
+resvg.workspace = true
+regex.workspace = true
+crc32fast.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+roxmltree = "0.21.1"
+
+[[bench]]
+name = "text_diff"
+harness = false
+
+[[bench]]
+name = "folder_tree"
+harness = false

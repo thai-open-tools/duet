@@ -1,0 +1,59 @@
+name: "✨ Feature request · ขอฟีเจอร์"
+description: "Something you wish duet did, or did differently. · สิ่งที่อยากให้ duet ทำได้ หรืออยากให้ทำต่างจากเดิม"
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome, big or small. Search the open cards first: if yours is there, a 👍 on it counts as a vote.
+        Write in **English or Thai**.
+
+        ยินดีรับทุกไอเดีย ไม่ว่าเล็กหรือใหญ่ ลองค้นการ์ดที่เปิดอยู่ก่อน ถ้ามีเรื่องเดียวกันแล้ว กด 👍 ที่การ์ดนั้นเพื่อโหวต
+        เขียนเป็น **ภาษาไทยหรืออังกฤษ** ก็ได้
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "What are you trying to do? · อยากทำอะไร"
+      description: "The job, not the button: for example \"check two releases before a deploy\". · บอกงานที่อยากทำ ไม่ต้องบอกเป็นปุ่ม เช่น \"ตรวจสองรุ่นก่อน deploy\""
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: "How would you like it to work? · อยากให้ทำงานอย่างไร"
+      description: "Sketches and screenshots are welcome. · แนบภาพร่างหรือภาพหน้าจอได้"
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: "What do you do today instead? · ตอนนี้ทำอย่างไรแทน"
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: "Which part of duet? · เกี่ยวกับส่วนไหน"
+      options:
+        - "Folder compare · เทียบโฟลเดอร์"
+        - "Copy, delete or sync · คัดลอก ลบ หรือซิงก์"
+        - "Reports · รายงาน"
+        - "Text compare or editing · เทียบหรือแก้ไขข้อความ"
+        - "3-way merge · รวมสามทาง"
+        - "Tables · ตาราง"
+        - "Pictures · รูปภาพ"
+        - "Hex · เทียบแบบ Hex"
+        - "Install, update or platforms · การติดตั้ง อัปเดต หรือระบบปฏิบัติการ"
+        - "Something new · เรื่องใหม่"
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: "How much would it help you? · ช่วยคุณได้แค่ไหน"
+      options:
+        - "Nice to have · มีก็ดี"
+        - "Saves me time every week · ช่วยประหยัดเวลาทุกสัปดาห์"
+        - "I cannot do my work without it · ถ้าไม่มี ทำงานไม่ได้"

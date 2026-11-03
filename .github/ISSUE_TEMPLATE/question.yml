@@ -1,0 +1,23 @@
+name: "❓ Question · คำถาม"
+description: "Not sure how to do something in duet. · ไม่แน่ใจว่าต้องทำอย่างไรใน duet"
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The guide inside duet (press **F1**, in Thai or English) answers many questions. If it does not answer yours, ask here.
+
+        คู่มือในโปรแกรม (กด **F1** มีทั้งภาษาไทยและอังกฤษ) ตอบคำถามส่วนใหญ่ไว้แล้ว ถ้ายังไม่เจอคำตอบ ถามที่นี่ได้เลย
+
+  - type: textarea
+    id: question
+    attributes:
+      label: "Your question · คำถาม"
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: "What have you tried? · ลองทำอะไรไปแล้วบ้าง"
