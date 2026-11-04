@@ -47,10 +47,15 @@ foreach ($dir in $places) {
     $link.IconLocation = "$exe,0"
     $link.Save()
     Move-Item -LiteralPath $staged -Destination (Join-Path $dir 'duet compare.lnk') -Force
-    # The name these shortcuts had before: removed only when it is this install's own.
+    # The name these shortcuts had before: removed only when it is this install's own. Read from
+    # a copy in the temp folder, as WScript.Shell cannot read a non-ASCII path either.
     $old = Join-Path $dir 'duet.lnk'
-    if ((Test-Path -LiteralPath $old) -and $shell.CreateShortcut($old).TargetPath -eq $exe) {
-        Remove-Item -LiteralPath $old
+    if (Test-Path -LiteralPath $old) {
+        $peek = Join-Path ([IO.Path]::GetTempPath()) 'duet-old.lnk'
+        Copy-Item -LiteralPath $old -Destination $peek -Force
+        $target = $shell.CreateShortcut($peek).TargetPath
+        Remove-Item -LiteralPath $peek
+        if ($target -eq $exe) { Remove-Item -LiteralPath $old }
     }
 }
 # Explorer caches icons: without this, a shortcut made before the exe had its icon stays blank.
