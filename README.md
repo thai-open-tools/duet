@@ -327,7 +327,7 @@ No other software is needed. macOS and Linux are not supported yet; see the [roa
 > [!IMPORTANT]
 > The 0.1 builds are not code-signed yet, so Windows SmartScreen may say *Windows protected your PC*.
 > Choose **More info**, check that the file name matches the one you downloaded, then **Run anyway**.
-> You can compare the file's SHA-256 with `SHA256SUMS.txt` first: `Get-FileHash .\duet-0.1.0-setup-x64.exe`.
+> You can compare the file's SHA-256 with `SHA256SUMS.txt` first: `Get-FileHash .\duet-0.1.1-setup-x64.exe`.
 
 Your settings, the recent list and the theme live in `%LOCALAPPDATA%\duet`. Uninstalling leaves
 them, so a reinstall picks up where you left off; delete that folder to start fresh.
