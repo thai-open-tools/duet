@@ -486,11 +486,14 @@ impl MergeView {
         let (text, resolved) = (field_value(resolution), resolution.is_some());
         let (rows, rows_max) = field_rows(resolved);
         let state = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            let mut field = TextareaState::new(window, cx)
                 .auto_grow(rows, rows_max)
                 .soft_wrap(false)
-                .placeholder(field_placeholder(resolved))
-                .default_value(text)
+                .placeholder(field_placeholder(resolved));
+            // Not `default_value`: that one counts the rows at paint, too late for this frame's
+            // layout, and a notify during paint draws no next frame, so the box stays clipped.
+            field.set_value(text, window, cx);
+            field
         });
         let subscription = cx.subscribe_in(
             &state,

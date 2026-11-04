@@ -110,7 +110,7 @@ fn the_text_report_covers_every_section_and_row_kind() {
     o.same = true;
     let text = folder_text(&items, Some(&lines), &o, &context());
     for want in [
-        "   (including 1 that differ only in unimportant parts)",
+        "   (including 1 that differs only in unimportant parts)",
         "Needs a closer look\r\n  [Linux scripts with CRLF or a BOM] conf/run.sh\r\n",
         "[(top level)]\r\n  > Makefile   \u{2014} only in PRD\r\n",
         "PRD newer \u{b7} only the file format differs (LF (Linux), UTF-8 / CRLF (Windows), UTF-8)",

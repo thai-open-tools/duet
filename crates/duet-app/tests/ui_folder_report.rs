@@ -763,3 +763,27 @@ async fn the_report_fields_stop_at_their_limits_while_typing(cx: &mut TestAppCon
         "the choices are what the fields show"
     );
 }
+
+/// The fields give up their height in a short window, so Create stays on screen.
+#[gpui_kit::test]
+async fn create_stays_on_screen_in_a_short_window(cx: &mut TestAppContext) {
+    let (_dir, a, b) = report_fixture();
+    let (handle, view) = open_report_fixture(cx, &a, &b);
+    wait_idle(cx, handle, &view).await;
+    open_export(cx, handle, &view, ReportFormat::Html);
+    let height = 420.;
+    cx.simulate_window_resize(
+        handle,
+        gpui_kit::size(gpui_kit::px(1200.), gpui_kit::px(height)),
+    );
+    let bottom = cx
+        .update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.find("folder-export-create").bounds().bottom()
+        })
+        .unwrap();
+    assert!(
+        bottom <= gpui_kit::px(height),
+        "Create ends at {bottom:?} in a window of {height} px"
+    );
+}

@@ -1254,27 +1254,12 @@ impl FolderView {
                 .text_color(p.dim)
                 .child(text)
         };
-        let body = v_flex()
-            .id("folder-export-panel")
+        let fields = v_flex()
+            .id("folder-export-fields")
             .test_support()
-            .track_focus(&panel.focus)
-            .key_context(CONTEXT)
-            .on_action(cx.listener(Self::export_confirm))
-            .w_full()
-            .max_w(px(760.))
-            .p(px(14.))
+            .min_h(px(72.))
+            .overflow_y_scroll()
             .gap(px(8.))
-            .rounded(px(10.))
-            .border_1()
-            .border_color(p.line)
-            .bg(p.panel)
-            .text_size(px(12.5))
-            .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_size(px(14.))
-                    .child("Create a report or export the compare"),
-            )
             .child(row(
                 "Format",
                 v_flex().gap(px(4.)).children(formats).into_any_element(),
@@ -1327,7 +1312,31 @@ impl FolderView {
             })
             .when(!reads, |body| {
                 body.child(help("folder-export-help-criterion", CRITERION_HELP))
-            })
+            });
+        let body = v_flex()
+            .id("folder-export-panel")
+            .test_support()
+            .track_focus(&panel.focus)
+            .key_context(CONTEXT)
+            .on_action(cx.listener(Self::export_confirm))
+            .w_full()
+            .max_w(px(760.))
+            // No taller than the window: the fields scroll, so Create stays on screen.
+            .max_h_full()
+            .p(px(14.))
+            .gap(px(8.))
+            .rounded(px(10.))
+            .border_1()
+            .border_color(p.line)
+            .bg(p.panel)
+            .text_size(px(12.5))
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_size(px(14.))
+                    .child("Create a report or export the compare"),
+            )
+            .child(fields)
             .child(
                 h_flex()
                     .justify_end()

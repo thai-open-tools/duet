@@ -47,11 +47,14 @@ fn rules_field(
     cx: &mut Context<TextView>,
 ) -> Entity<TextareaState> {
     cx.new(|cx| {
-        TextareaState::new(window, cx)
+        let mut field = TextareaState::new(window, cx)
             .auto_grow(3, 8)
             .soft_wrap(false)
-            .placeholder(placeholder)
-            .default_value(value)
+            .placeholder(placeholder);
+        // Not `default_value`: that one counts the rows at paint, too late for this frame's
+        // layout, and a notify during paint draws no next frame, so the box stays clipped.
+        field.set_value(value, window, cx);
+        field
     })
 }
 

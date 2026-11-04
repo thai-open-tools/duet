@@ -183,6 +183,14 @@ impl TextView {
         self.save_shortcut(window, cx);
     }
 
+    /// Ctrl+Shift+S: Save as… for the caret's side, the left one with no caret.
+    pub(super) fn on_save_as(&mut self, _: &SaveAs, window: &mut Window, cx: &mut Context<Self>) {
+        let left = self.caret.is_none_or(|c| c.left);
+        if self.side_has_text(left) {
+            self.save_as_dialog(left, window, cx);
+        }
+    }
+
     /// Esc clears a row selection, then cancels a running compare, then closes the bars, then gives the keys back to the
     /// rows from a toolbar control, then removes the IME's composed text, then drops the caret;
     /// with none of those it asks to go back to the folder tab.

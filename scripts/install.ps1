@@ -1,5 +1,5 @@
 # Installs duet for the current user: copies the release build to %LOCALAPPDATA%\Programs\duet
-# and adds "duet" shortcuts to the Desktop and the Start menu. Run it again after a new build.
+# and adds "duet compare" shortcuts to the Desktop and the Start menu. Run it again after a new build.
 # Remove: delete that folder, %LOCALAPPDATA%\duet (settings, recent list) and the two shortcuts.
 param(
     [string]$BinDir = (Join-Path $PSScriptRoot '..\target\release'),
@@ -43,10 +43,15 @@ foreach ($dir in $places) {
     $link = $shell.CreateShortcut($staged)
     $link.TargetPath = $exe
     $link.WorkingDirectory = $dest
-    $link.Description = 'duet: compare folders and files'
+    $link.Description = 'duet compare: folders and files'
     $link.IconLocation = "$exe,0"
     $link.Save()
-    Move-Item -LiteralPath $staged -Destination (Join-Path $dir 'duet.lnk') -Force
+    Move-Item -LiteralPath $staged -Destination (Join-Path $dir 'duet compare.lnk') -Force
+    # The name these shortcuts had before: removed only when it is this install's own.
+    $old = Join-Path $dir 'duet.lnk'
+    if ((Test-Path -LiteralPath $old) -and $shell.CreateShortcut($old).TargetPath -eq $exe) {
+        Remove-Item -LiteralPath $old
+    }
 }
 # Explorer caches icons: without this, a shortcut made before the exe had its icon stays blank.
 $refresh = Join-Path $env:SystemRoot 'System32\ie4uinit.exe'

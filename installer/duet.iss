@@ -16,7 +16,11 @@
 #define RepoUrl "https://github.com/ball46/duet"
 ; A test build can install side by side with a real one: ISCC /DAppName=duet-test /DAppGuid=<another GUID>
 #ifndef AppName
-  #define AppName "duet"
+  #define AppName "duet compare"
+  #define FileBase "duet"
+  #define RealBuild
+#else
+  #define FileBase AppName
 #endif
 #ifndef AppGuid
   #define AppGuid "F2E1350D-7680-4731-B9BC-1D5599BB450C"
@@ -37,14 +41,14 @@ AppUpdatesURL={#RepoUrl}/releases
 AppCopyright=Copyright (c) 2026 ball46. MIT License.
 AppComments=Compare folders and files: text, tables, pictures and bytes. Fast and offline.
 VersionInfoVersion={#AppVersion}
-VersionInfoDescription=duet setup
-VersionInfoProductName=duet
+VersionInfoDescription=duet compare setup
+VersionInfoProductName=duet compare
 
 ; Per-user by default (no administrator prompt), the same folder scripts\install.ps1 uses;
 ; the first page lets the user pick "all users" instead.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog commandline
-DefaultDirName={autopf}\{#AppName}
+DefaultDirName={autopf}\{#FileBase}
 DisableDirPage=auto
 DisableProgramGroupPage=yes
 UsePreviousAppDir=yes
@@ -80,7 +84,7 @@ RestartApplications=no
 ChangesEnvironment=yes
 
 OutputDir=..\dist
-OutputBaseFilename={#AppName}-{#ShortVersion}-setup-x64
+OutputBaseFilename={#FileBase}-{#ShortVersion}-setup-x64
 Compression=lzma2/ultra64
 SolidCompression=yes
 
@@ -115,6 +119,13 @@ Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreve
 ; written by scripts\third-party-notices.py before the installer is built
 Source: "..\dist\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
+#ifdef RealBuild
+[InstallDelete]
+; The shortcuts' name in 0.1.0, replaced by the ones below when upgrading.
+Type: files; Name: "{autoprograms}\duet.lnk"
+Type: files; Name: "{autodesktop}\duet.lnk"
+
+#endif
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "Compare folders and files"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "Compare folders and files"; Tasks: desktopicon
@@ -124,7 +135,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "Compare
 Root: HKA; Subkey: "{code:EnvKey}"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: PathMissing(ExpandConstant('{app}'))
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,duet}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 Filename: "{#RepoUrl}/issues/new/choose"; Description: "{cm:OpenGuide}"; Flags: shellexec nowait postinstall skipifsilent unchecked
 
 [Code]

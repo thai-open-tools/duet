@@ -75,8 +75,13 @@ pub fn folder_text(
         num(counts.same),
         if counts.unimportant > 0 {
             format!(
-                "   (including {} that differ only in unimportant parts)",
-                num(counts.unimportant)
+                "   (including {} that {} only in unimportant parts)",
+                num(counts.unimportant),
+                if counts.unimportant == 1 {
+                    "differs"
+                } else {
+                    "differ"
+                }
             )
         } else {
             String::new()

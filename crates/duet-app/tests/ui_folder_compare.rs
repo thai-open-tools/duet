@@ -1136,3 +1136,29 @@ async fn delete_never_follows_a_junction_made_after_the_compare(cx: &mut TestApp
     assert_eq!(cx.pending_prompt().unwrap().0, "1 item failed.");
     cx.simulate_prompt_answer("OK");
 }
+
+/// A press in the legend closes it (F-56) and stops there: the row under the panel stays
+/// unselected.
+#[gpui_kit::test]
+async fn a_press_in_the_legend_leaves_the_rows_under_it_alone(cx: &mut TestAppContext) {
+    let (l, r) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for i in 0..40 {
+        let name = format!("file{i:03}.txt");
+        std::fs::write(l.path().join(&name), "left").unwrap();
+        std::fs::write(r.path().join(&name), "right!").unwrap();
+    }
+    let (handle, view) = open_folder(cx, l.path(), r.path());
+    wait_idle(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.toggle_legend(cx));
+    let selected =
+        |cx: &mut TestAppContext| view.read_with(cx, |v, _| v.model().unwrap().selected_row());
+    let before = selected(cx);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click(("folder-legend-row", 12usize), cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert!(view.read_with(cx, |v, _| !v.legend_open()), "it closes");
+    assert_eq!(selected(cx), before, "the press does not reach the list");
+}

@@ -253,7 +253,7 @@ pub const TEXT: TopicText = TopicText {
         Block::Heading("Editing"),
         Block::Bullets(&[
             "Copy a block with the arrows in the middle, {Alt+→} and {Alt+←}, or {Ctrl+R} and {Ctrl+L}. The two [All] buttons copy everything to the right or to the left.",
-            "Click into a line and type. {Ctrl+Z} undoes, {Ctrl+Y} redoes, and {Ctrl+S} saves the edited side ([Save left], [Save right]).",
+            "Click into a line and type. {Ctrl+Z} undoes, {Ctrl+Y} redoes, and {Ctrl+S} saves the edited side ([Save left], [Save right]). {Ctrl+Shift+S} saves the side under a new name.",
             "[On save: keep] chooses the line endings and the encoding a save writes; otherwise a save keeps the file's own.",
             "When another program changes an open file, a bar offers [Reload] and [Ignore]. {F5} reloads too.",
         ]),

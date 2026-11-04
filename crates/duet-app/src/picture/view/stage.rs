@@ -17,7 +17,7 @@ use gpui_kit::{
 use super::*;
 use crate::picture::menu::context_menu;
 use crate::picture::prefs::Mode;
-use crate::picture::textures::{EnlargeKey, Enlargements, checker};
+use crate::picture::textures::{CHECKER_PAD, EnlargeKey, Enlargements, checker};
 use crate::picture::zoom::{
     self, bounds_at, center_on, clamp_scroll, clip_to, clip_x, enlarge_factor, fit_zoom,
     group_marker, pattern_cells, scrollbars, split_at, stage_origin, visible_crop, wheel_factor,
@@ -322,7 +322,9 @@ fn layers_canvas(
                 }
                 for &at in &layer.checker {
                     let image = checker.clone();
-                    let _ = window.paint_image(layer.clip, at, Corners::default(), image, 0, false);
+                    let shown = layer.clip.intersect(&at);
+                    let whole = at.dilate(px(CHECKER_PAD));
+                    let _ = window.paint_image(shown, whole, Corners::default(), image, 0, false);
                 }
                 for (image, at) in &layer.images {
                     let image = image.clone();

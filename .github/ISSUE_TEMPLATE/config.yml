@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: "🔒 Security problem · ปัญหาด้านความปลอดภัย"
-    url: https://github.com/ball46/duet/security/advisories/new
-    about: "Report it privately, not in a public card. · แจ้งแบบส่วนตัว ไม่ต้องเปิดการ์ดสาธารณะ"
+    url: https://github.com/ball46/duet/blob/main/SECURITY.md
+    about: "How to report it privately, not in a public card. · วิธีแจ้งแบบส่วนตัว ไม่ต้องเปิดการ์ดสาธารณะ"

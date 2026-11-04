@@ -247,14 +247,21 @@ fn leads(grapheme: &str) -> bool {
     grapheme.starts_with(|c| ('\u{E40}'..='\u{E44}').contains(&c))
 }
 
+/// A Thai vowel or sign written after its consonant that is still a grapheme of its own (ฯ ะ า
+/// ๅ ๆ): a line never breaks before one, which would leave it alone at the line's start.
+fn follows(grapheme: &str) -> bool {
+    grapheme.starts_with(['\u{E2F}', '\u{E30}', '\u{E32}', '\u{E45}', '\u{E46}'])
+}
+
 /// Byte offsets where each segment of `source` starts when its text is `width` columns wide
 /// (R3); the first is 0, an empty line gives [0], at most `max` starts.
 ///
 /// Columns count as `walk_columns` counts them, with tab stops from each segment's start. A
 /// segment breaks after its last space or tab past its first grapheme, otherwise before the
-/// grapheme that overflows: never inside a grapheme cluster, and never after a Thai leading
-/// vowel. A segment's first grapheme always fits, however wide. Width 0 means the columns are
-/// not measured yet: one segment. It walks at most `max` segments of the line, never the rest.
+/// grapheme that overflows: never inside a grapheme cluster, never after a Thai leading vowel
+/// and never before a Thai following one. A segment's first grapheme always fits, however
+/// wide. Width 0 means the columns are not measured yet: one segment. It walks at most `max`
+/// segments of the line, never the rest.
 pub fn wrap_starts(source: &str, tab_width: usize, width: usize, max: usize) -> Vec<usize> {
     let mut starts = vec![0];
     if width == 0 {
@@ -270,10 +277,14 @@ pub fn wrap_starts(source: &str, tab_width: usize, width: usize, max: usize) -> 
         if starts.len() >= max {
             break;
         }
-        if !joined {
+        let follower = follows(grapheme);
+        if !joined && !follower {
             unit = at;
         }
         joined = leads(grapheme);
+        if follower && after_space == Some(at) {
+            after_space = None;
+        }
         loop {
             let wide = if grapheme == "\t" {
                 tab - column % tab
@@ -774,6 +785,26 @@ mod tests {
 
     /// The Thai leading vowels เ แ โ ใ ไ.
     const LEADING: [char; 5] = ['\u{E40}', '\u{E41}', '\u{E42}', '\u{E43}', '\u{E44}'];
+
+    #[test]
+    fn a_thai_following_vowel_never_opens_a_segment() {
+        assert_eq!(
+            wrap_starts("กากากา", 4, 3, 200),
+            [0, 6, 12],
+            "the line breaks before the consonant, not between it and its า"
+        );
+        let thai = "ภาษาไทยมีกาน้ำชาและกะทิ ต่าง ๆ ฯลฯ นานาๆ ครั้งๅ";
+        for width in 1..=12 {
+            let starts = wrap_starts(thai, 4, width, 200);
+            for &start in &starts[1..] {
+                assert!(
+                    !thai[start..]
+                        .starts_with(['\u{E2F}', '\u{E30}', '\u{E32}', '\u{E45}', '\u{E46}']),
+                    "width {width}: {start} of {starts:?} opens with a following vowel"
+                );
+            }
+        }
+    }
 
     #[test]
     fn wrap_starts_break_after_spaces_and_never_inside_a_cluster() {

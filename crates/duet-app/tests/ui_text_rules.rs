@@ -972,3 +972,34 @@ async fn a_typing_burst_relexes_once_after_the_pause(cx: &mut TestAppContext) {
     wait_syntax(cx, &view, true).await;
     assert!(!view.read_with(cx, |v, _| v.line_styles_for_test(true, 1).is_empty()));
 }
+
+#[gpui_kit::test]
+async fn saved_rules_open_with_a_row_for_each_line(cx: &mut TestAppContext) {
+    let (_dir, handle, view) = open_text(cx, "a\nb\n", "a\nB\n");
+    wait_loaded(cx, handle, &view).await;
+    render(cx, handle);
+    // No `render` after opening: the frame that made the field is the one to read.
+    let open = |cx: &mut TestAppContext| {
+        cx.update_window(handle, |_, window, cx| {
+            view.update(cx, |v, cx| v.open_rules(window, cx))
+        })
+        .unwrap();
+        cx.update_window(handle, |_, window, _| {
+            window.find("text-rules-text").bounds().size.height
+        })
+        .unwrap()
+    };
+    let empty = open(cx);
+    set_fields(cx, handle, &view, ("a\nb\nc\nd\ne\nf", "", "3"));
+    assert!(apply_rules(cx, handle, &view), "the patterns are valid");
+    assert!(
+        view.read_with(cx, |v, _| !v.rules_open()),
+        "Apply closes it"
+    );
+    render(cx, handle);
+    let six_lines = open(cx);
+    assert!(
+        six_lines > empty,
+        "six saved rules must not open clipped to the three rows: {six_lines:?} {empty:?}"
+    );
+}

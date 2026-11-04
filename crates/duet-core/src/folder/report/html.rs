@@ -92,7 +92,7 @@ const JS: &str = concat!(
     "[].forEach.call(document.querySelectorAll(\".it\"),function(el){var ok=on[el.getAttribute(\"data-st\")]!==false&&(!t||el.getAttribute(\"data-p\").indexOf(t)>=0);el.hidden=!ok;if(ok)n++;});",
     "[].forEach.call(document.querySelectorAll(\".box\"),function(g){g.hidden=!g.querySelector(\".it:not([hidden])\");});",
     "[].forEach.call(document.querySelectorAll(\"h3.sub\"),function(h){var e=h.nextElementSibling,v=false;while(e&&!/^H[23]$/.test(e.tagName)){if(!e.hidden&&e.classList.contains(\"box\"))v=true;e=e.nextElementSibling;}h.hidden=!v;});",
-    "if(cnt)cnt.textContent=\"Showing \"+n.toLocaleString()+\" files\";}",
+    "if(cnt)cnt.textContent=\"Showing \"+n.toLocaleString()+(n===1?\" file\":\" files\");}",
     "if(q){q.addEventListener(\"input\",apply);bx.forEach(function(b){b.addEventListener(\"change\",apply);});apply();}",
     "function all(v){[].forEach.call(document.querySelectorAll(\"details.f\"),function(d){if(!d.hidden)d.open=v;});}",
     "var x=document.getElementById(\"exp\"),y=document.getElementById(\"col\");if(x)x.onclick=function(){all(true);};if(y)y.onclick=function(){all(false);};",
@@ -807,8 +807,13 @@ fn summary(
         c.same,
         if c.unimportant > 0 {
             format!(
-                "Including {} that differ only in unimportant parts",
-                num(c.unimportant)
+                "Including {} that {} only in unimportant parts",
+                num(c.unimportant),
+                if c.unimportant == 1 {
+                    "differs"
+                } else {
+                    "differ"
+                }
             )
         } else {
             "Contents match".to_owned()

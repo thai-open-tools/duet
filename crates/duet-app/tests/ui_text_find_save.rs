@@ -839,3 +839,23 @@ async fn a_side_with_the_read_only_attribute_is_read_only(cx: &mut TestAppContex
     set_read_only(&right, false);
     assert_eq!(std::fs::read(&right).unwrap(), right_bytes);
 }
+
+#[gpui_kit::test]
+async fn ctrl_shift_s_saves_the_caret_side_under_a_new_name(cx: &mut TestAppContext) {
+    let (dir, handle, view) = open_text(cx, "left\n", "right\n");
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.set_caret_for_test(false, 0, cx));
+    press(cx, handle, "ctrl-shift-s");
+    assert!(cx.did_prompt_for_new_path(), "it asks where to save");
+    let out = dir.path().join("copy.txt");
+    cx.simulate_new_path_selection(|_| Some(out.clone()));
+    for _ in 0..2000 {
+        if out.exists() {
+            break;
+        }
+        cx.executor()
+            .timer(std::time::Duration::from_millis(10))
+            .await;
+    }
+    assert_eq!(std::fs::read(&out).unwrap(), b"right\n");
+}

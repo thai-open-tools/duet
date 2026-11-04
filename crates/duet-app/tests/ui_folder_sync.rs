@@ -1207,3 +1207,49 @@ async fn the_selected_count_is_worked_out_once_per_selection_change(cx: &mut Tes
     press(cx, handle, "f8");
     assert_eq!(count(cx).as_deref(), Some("Selected items only (1)"));
 }
+
+/// A long plan in a short window: the list gives up its height and Start stays on screen.
+#[gpui_kit::test]
+async fn start_sync_stays_on_screen_in_a_short_window(cx: &mut TestAppContext) {
+    let (l, r) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for i in 0..80 {
+        std::fs::write(l.path().join(format!("file{i:03}.txt")), "x").unwrap();
+    }
+    let (handle, view) = open_folder(cx, l.path(), r.path());
+    wait_idle(cx, handle, &view).await;
+    open_panel(cx, handle, &view).await;
+    let measure = |cx: &mut TestAppContext| {
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            (
+                window.find("folder-sync-start").bounds().bottom(),
+                window.find("folder-sync-list").bounds().size.height,
+            )
+        })
+        .unwrap()
+    };
+    cx.simulate_window_resize(
+        handle,
+        gpui_kit::size(gpui_kit::px(1200.), gpui_kit::px(1100.)),
+    );
+    let (_, tall_list) = measure(cx);
+    assert_eq!(
+        tall_list,
+        gpui_kit::px(300.),
+        "room to spare: the full list"
+    );
+    let height = 500.;
+    cx.simulate_window_resize(
+        handle,
+        gpui_kit::size(gpui_kit::px(1200.), gpui_kit::px(height)),
+    );
+    let (bottom, list) = measure(cx);
+    assert!(
+        bottom <= gpui_kit::px(height),
+        "Start sync ends at {bottom:?} in a window of {height} px"
+    );
+    assert!(
+        list >= gpui_kit::px(72.),
+        "the list stays readable: {list:?}"
+    );
+}

@@ -15,6 +15,8 @@ from PIL import Image, ImageChops, ImageDraw
 AMBER = (224, 170, 74, 255)
 INK = (23, 18, 10, 255)
 SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
+# The header's icon, one picture per Windows display scale (crates/duet-app/src/ui/brand.rs).
+HEADER_SIZES = [26, 32, 40, 46, 52, 58, 64, 78, 92]
 SS = 16  # supersampling factor
 
 ASSETS = Path(__file__).resolve().parent.parent / "crates" / "duet-app" / "assets"
@@ -100,6 +102,12 @@ def main():
     frames = {size: draw(size) for size in SIZES}
     for size, im in frames.items():
         print(f"{size:>3} px  arrow margins left/right/top/bottom = {check(im)}")
+    header = ASSETS / "header"
+    header.mkdir(exist_ok=True)
+    for size in HEADER_SIZES:
+        im = draw(size)
+        print(f"{size:>3} px  arrow margins left/right/top/bottom = {check(im)}")
+        im.save(header / f"duet-{size}.png", optimize=True)
     big = draw(512)
     check(big)
     big.save(ASSETS / "duet-512.png")

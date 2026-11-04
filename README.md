@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/banner-dark.png">
-    <img alt="duet: compare folders, text, tables, pictures and bytes" src="docs/brand/banner-light.png" width="100%">
+    <img alt="duet compare: folders, text, tables, pictures and bytes, side by side" src="docs/brand/banner-light.png" width="100%">
   </picture>
 </p>
 
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>A fast, offline compare tool for Windows: folders, text, tables, pictures and raw bytes, side by side.</b><br>
+  <b>duet compare is a fast, offline compare tool for Windows: folders, text, tables, pictures and raw bytes, side by side.</b><br>
   See what changed between two releases, two configs or two folders at a glance, merge three versions,<br>
   sync what you choose, and hand your team a report. Nothing ever leaves your computer.
 </p>
@@ -45,6 +45,7 @@
 <p align="center">
   <a href="#why-duet">Why duet</a> ·
   <a href="#what-it-compares">What it compares</a> ·
+  <a href="#reports-you-can-hand-to-someone">Reports</a> ·
   <a href="#details-that-save-you-a-bad-day">Details</a> ·
   <a href="#download-and-install">Install</a> ·
   <a href="#command-line">Command line</a> ·
@@ -90,6 +91,10 @@ compare is **easier to do and clearer to read**:
 - **A sync you can read first.** Every copy and delete is listed before you press Start, and deletes go to the Recycle Bin.
 - **Thai, properly.** Thai text in UTF-8 or windows-874 is detected and shown correctly, and the built-in guide reads in Thai or English.
 
+**Where the name comes from.** A duet is two performers on one piece of music. That is the idea of this
+tool: it sets two sides next to each other, so you see at once where they part ways. The full name is
+**duet compare**, so it says what it does, and the command stays short: `duet LEFT RIGHT`.
+
 > [!NOTE]
 > duet is an independent open-source project, written from scratch. It is not affiliated with,
 > endorsed by or connected to Scooter Software, and contains no Beyond Compare code.
@@ -121,7 +126,7 @@ type two paths, or pick a tile on the Start tab.
 - Chips for **All, Mismatched, Changed, Left only, Right only, Same**; a tree or a flat sortable list; counts per folder.
 - Include and exclude masks (`*.xml; target; /web.config`), a path filter, and *Exclude this item* from the right-click menu.
 - Copy either way (keeping modified times), delete to the Recycle Bin, set times, and **sync** in five modes (update right, left or both; mirror right or left) with a full preview.
-- **Reports** in HTML, Excel (.xlsx, with a *Result* column for team review), text and CSV, with the differing lines of each file if you want them.
+- **Reports** in HTML, Excel (.xlsx, with a *Result* column for team review), text and CSV, with the differing lines of each file if you want them. [See what each one looks like](#reports-you-can-hand-to-someone).
 
 ### Text, and 3-way merge
 
@@ -173,6 +178,124 @@ type two paths, or pick a tile on the Start tab.
 </p>
 
 - Binary files of any size, byte by byte, with 8, 16 or 32 bytes a row, *differences only*, go to an offset, and find hex bytes or text.
+
+## Reports you can hand to someone
+
+Finding the differences is half the job. The other half is telling your team what you found. In a
+folder tab, press **Report**, pick a format, and duet writes one file you can send. The person who
+gets it does not need duet.
+
+Every format starts the same way. You name the two sides (*PROD* and *UAT* read better than "left"
+and "right", and duet remembers the names for that folder pair), add a title and a note such as the
+change number, and choose the scope: all items, what the filter shows now, or only what you selected.
+
+| You want to | Use | What the reader gets |
+|---|---|---|
+| Send the result to someone who just wants to read it | **HTML** | One file that opens in any browser, with no network |
+| Track a review as a team, file by file | **Excel (.xlsx)** | Three sheets, with columns for who checked what and the result |
+| Paste into a ticket or keep beside a release | **Text (.txt)** | Plain text, readable anywhere |
+| Feed another program or your own script | **CSV** | One row per file, ready to filter |
+
+The pictures and samples below come from real reports of the made-up shop release the other pictures on this page use.
+
+### HTML: the one to send
+
+The reader gets the answer before any detail: the counts, a bar showing how much differs, and plain
+sentences such as "8 of 11 files do not match". Anything risky gets its own **Needs a closer look**
+box. Here that is a Linux script saved with Windows line endings and a file with an invisible
+character, two things that are easy to miss in a long list.
+
+<p align="center">
+  <img alt="The top of an HTML report: the two sides named PROD and UAT, cards with the counts, a bar of how much differs, a short list of conclusions and a Needs a closer look box" src="docs/images/report-html.png" width="100%">
+</p>
+
+Further down come a table per folder and then the files. Search by name, tick states on or off, and
+click a file to see its differing lines side by side with the changed characters marked.
+
+<p align="center">
+  <img alt="The Files section of an HTML report: a search box, state filters, and two files opened to show their differing lines side by side, with a password value hidden" src="docs/images/report-html-file.png" width="100%">
+</p>
+
+The styles and scripts are inside the file, so it opens with no network. Press **Ctrl+P** in the
+browser to print it or save a PDF; every section opens for the printout.
+
+### Excel: the one to review with
+
+The workbook has three sheets:
+
+- **Summary:** both sides, how the files were compared, and the counts.
+- **Files:** one row per file, with a filter on every column and the header and first columns frozen
+  as you scroll. The yellow **Reviewer**, **Result** and **Reviewer note** columns are for your team,
+  and **Result** offers *Passed, Needs a fix, To review, Not relevant*. A file's name links to its
+  rows on the next sheet.
+- **Changed lines:** every differing line with both sides next to each other, ready to filter by file.
+
+<p align="center">
+  <img alt="The Files sheet: one row per file with status, a warning column and line counts, and yellow columns for reviewer, result and note" src="docs/images/report-excel-files.png" width="100%">
+</p>
+
+<p align="center"><sub>The Files sheet after a review. duet writes the rows; the yellow columns were typed in for this picture, and the wide columns (sizes, times, full paths) are hidden so it fits.</sub></p>
+
+<p align="center">
+  <img alt="The Changed lines sheet: each differing line with its file, line numbers and the text of both sides, coloured by kind of change" src="docs/images/report-excel-lines.png" width="100%">
+</p>
+
+### Text and CSV: the ones for other tools
+
+The text report reads well in a ticket, an email or a terminal (shortened here):
+
+```text
+Folder compare report — Release 1.5: review before deploy
+Change CHG-1042
+A = PROD : X:\shop-1.4
+B = UAT : X:\shop-1.5
+
+Summary
+  All files        11   (mismatched 8)
+  ≠ Different      6
+  < Only in A      1   (PROD)
+  > Only in B      1   (UAT)
+  = Same           3   (including 1 that differs only in unimportant parts)
+
+Needs a closer look
+  [Invisible characters in the text or values] i18n/th.json (UAT)
+  [Linux scripts with CRLF or a BOM] scripts/deploy.sh
+
+Details by folder
+
+[config]
+  ≠ app.properties   — Lines: 3 changed
+        A 1 | B 1: server.port=8080
+      ~ A 2: session.timeout=15
+      ~ B 2: session.timeout=30
+      ~ A 3: feature.promptpay=false
+      ~ B 3: feature.promptpay=true
+      ~ A 4: db.password=•••••• (hidden #7f53)
+      ~ B 4: db.password=•••••• (hidden #d52e)
+```
+
+CSV gives one row per file. It carries a BOM and Windows line endings, so Excel reads Thai correctly
+(shortened here):
+
+```csv
+No.,Folder,File name,Type,Status,Needs a look,Changed (lines),Only in PROD (lines),Only in UAT (lines),…
+2,config,app.properties,properties,Different,,3,0,0,…
+4,i18n,th.json,json,Different,Invisible characters in the text or values (UAT),2,0,1,…
+5,scripts,deploy.sh,sh,Different,Linux scripts with CRLF or a BOM,,,,…
+```
+
+### Before a report leaves your team
+
+- **Hide values that look like passwords.** Turn this on before you share. `db.password=…` becomes
+  `db.password=•••••• (hidden #7f53)`, private keys are hidden too, and the same value always gets the
+  same code, so a reader can still tell that a value changed without seeing it. It guesses from
+  names, so read the report before you send it.
+- **Show each file's differing lines.** This needs **Content** or the text rules as the criterion,
+  because duet has to read the files. **Esc** cancels before anything is written.
+
+Other tabs export too. A text tab offers an HTML report, a patch file (unified diff), a text report,
+or the patch on the clipboard. A table tab exports its differences as CSV or an HTML report, and a
+picture tab exports a difference image.
 
 ## Details that save you a bad day
 

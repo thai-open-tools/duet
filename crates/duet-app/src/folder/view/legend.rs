@@ -106,6 +106,7 @@ pub(super) fn legend_panel(p: &Palette) -> impl IntoElement {
         v_flex()
             .id("folder-legend-panel")
             .test_support()
+            .occlude()
             .absolute()
             .top(px(28.))
             .left_0()

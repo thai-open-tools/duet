@@ -177,7 +177,10 @@ def banner(p, dark, size=(1280, 400), tagline=True):
     icon = ICON(512).resize((round(140 * s),) * 2, Image.Resampling.LANCZOS)
     im.alpha_composite(icon, (round(100 * s), H // 2 - icon.height // 2))
     d = ImageDraw.Draw(im)
-    wordmark(d, (round(270 * s), H // 2 - round(34 * s)), round(110 * s), p, anchor="lm")
+    x, baseline = round(270 * s), H // 2 + round(4 * s)
+    wordmark(d, (x, baseline), round(110 * s), p, anchor="ls")
+    x += d.textlength("duet ", font=font("seguisb.ttf", round(110 * s)))
+    d.text((x, baseline), "compare", font=font("segoeui.ttf", round(66 * s)), fill=rgb(p["muted"]), anchor="ls")
     if tagline:
         d.text((round(276 * s), H // 2 + round(44 * s)), "Folders, text, tables, pictures and bytes.",
                font=font("segoeui.ttf", round(26 * s)), fill=rgb(p["muted"]), anchor="lm")

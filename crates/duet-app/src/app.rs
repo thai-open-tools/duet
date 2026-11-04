@@ -61,6 +61,9 @@ pub fn window_size_override(text: Option<&str>) -> Option<Size<Pixels>> {
     (w >= 320. && h >= 240.).then(|| size(px(w), px(h)))
 }
 
+/// The name people see; the program and its folders stay `duet`.
+pub const APP_NAME: &str = "duet compare";
+
 pub fn window_options(cx: &App) -> WindowOptions {
     let display = cx.primary_display().map(|d| d.bounds().size);
     let size = window_size_override(std::env::var("DUET_WINDOW_SIZE").ok().as_deref())
@@ -68,7 +71,7 @@ pub fn window_options(cx: &App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::centered(size, cx)),
         titlebar: Some(TitlebarOptions {
-            title: Some("duet".into()),
+            title: Some(APP_NAME.into()),
             ..Default::default()
         }),
         ..Default::default()

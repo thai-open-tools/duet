@@ -172,9 +172,15 @@ impl Enlargements {
     }
 }
 
-/// The checkerboard behind pictures (LocalDiff `--im-ck1`/`--im-ck2`, R18): 64 × 64 px of 8 px
-/// squares, in the theme's colours. One image per theme serves the whole process, so it is
-/// uploaded once per window (16 KB) and never dropped.
+/// How much more of the pattern the checkerboard image holds around its 64 px cell. Drawn at a
+/// fractional scale, the filter reads a texel past the cell's edge: without this, that is the
+/// atlas's empty space, and every cell's edge shows as a dark seam (I-33). Whole periods of the
+/// pattern (16 px), so the cell looks the same.
+pub const CHECKER_PAD: f32 = 16.;
+
+/// The checkerboard behind pictures (LocalDiff `--im-ck1`/`--im-ck2`, R18): a 64 × 64 px cell of
+/// 8 px squares and `CHECKER_PAD` around it, in the theme's colours. One image per theme serves
+/// the whole process, so it is uploaded once per window (36 KB) and never dropped.
 pub fn checker(dark: bool) -> Arc<RenderImage> {
     static DARK: OnceLock<Arc<RenderImage>> = OnceLock::new();
     static LIGHT: OnceLock<Arc<RenderImage>> = OnceLock::new();
@@ -188,14 +194,15 @@ fn checker_image(dark: bool) -> Arc<RenderImage> {
     } else {
         ([0xff, 0xff, 0xff], [0xe3, 0xe7, 0xed])
     };
-    let mut bgra = Vec::with_capacity(64 * 64 * 4);
-    for y in 0..64u32 {
-        for x in 0..64u32 {
+    let side = 64 + 2 * CHECKER_PAD as u32;
+    let mut bgra = Vec::with_capacity((side * side * 4) as usize);
+    for y in 0..side {
+        for x in 0..side {
             let [r, g, b] = if (x / 8 + y / 8) % 2 == 0 { one } else { two };
             bgra.extend_from_slice(&[b, g, r, 255]);
         }
     }
-    frame_image(64, 64, bgra)
+    frame_image(side, side, bgra)
 }
 
 /// Every image of the tiles, for dropping.
@@ -324,6 +331,29 @@ mod tests {
         assert_eq!(cache.images().count(), 0);
     }
 
+    /// The filter reads a texel past a cell's edge, so the image goes on past the cell: every
+    /// texel of the padding is the pattern, which repeats every 16 px (I-33).
+    #[test]
+    fn the_checkerboard_image_holds_the_pattern_past_its_cell() {
+        let image = checker(true);
+        let side = 64 + 2 * CHECKER_PAD as usize;
+        assert_eq!(image.size(0).width.0 as usize, side);
+        assert_eq!(
+            CHECKER_PAD as usize % 16,
+            0,
+            "whole periods keep the cell's look"
+        );
+        let px = |x: usize, y: usize| {
+            let at = (y * side + x) * 4;
+            bytes(&image)[at..at + 4].to_vec()
+        };
+        for y in 0..side {
+            for x in 0..side {
+                assert_eq!(px(x, y), px(x % 16, y % 16), "at {x},{y}");
+            }
+        }
+    }
+
     #[test]
     fn one_checkerboard_serves_every_frame() {
         assert_eq!(checker(true).id, checker(true).id);
@@ -333,7 +363,7 @@ mod tests {
     #[test]
     fn the_checkerboard_alternates_8px_squares_in_the_theme_colours() {
         let px = |image: &RenderImage, x: usize, y: usize| {
-            let at = (y * 64 + x) * 4;
+            let at = (y * (64 + 2 * CHECKER_PAD as usize) + x) * 4;
             bytes(image)[at..at + 4].to_vec()
         };
         let dark = checker(true);

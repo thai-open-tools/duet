@@ -103,9 +103,7 @@ pub fn path_menu(view: &TextView, left: bool) -> Vec<MenuEntry> {
         &view.request.right
     };
     let dirty = model.is_some_and(|m| m.is_dirty(left));
-    let has_text = model.is_some_and(|m| {
-        m.buffer(left).is_some() || (if left { m.left() } else { m.right() }).text().is_some()
-    });
+    let has_text = view.side_has_text(left);
     let editable = model.is_some_and(|m| m.editable(left).is_ok());
     let exists = path.exists();
     macro_rules! side {
@@ -210,8 +208,20 @@ impl TextView {
         cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
     }
 
+    /// Whether the side holds text that Save as… can write.
+    pub(crate) fn side_has_text(&self, left: bool) -> bool {
+        self.model.as_ref().is_some_and(|m| {
+            m.buffer(left).is_some() || (if left { m.left() } else { m.right() }).text().is_some()
+        })
+    }
+
     /// Save as…: asks where, then writes the side there.
-    fn save_as_dialog(&mut self, left: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn save_as_dialog(
+        &mut self,
+        left: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let path = self.side_path(left);
         let dir = path.parent().map(PathBuf::from).unwrap_or_default();
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned());

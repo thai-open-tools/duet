@@ -73,12 +73,12 @@ BEGIN
     BLOCK "040904B0"
     BEGIN
       VALUE "CompanyName", "ball46\0"
-      VALUE "FileDescription", "duet: compare folders and files\0"
+      VALUE "FileDescription", "duet compare\0"
       VALUE "FileVersion", "{version}\0"
       VALUE "InternalName", "duet\0"
       VALUE "LegalCopyright", "Copyright (c) 2026 ball46. MIT License.\0"
       VALUE "OriginalFilename", "duet.exe\0"
-      VALUE "ProductName", "duet\0"
+      VALUE "ProductName", "duet compare\0"
       VALUE "ProductVersion", "{version}\0"
     END
   END

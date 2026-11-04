@@ -4026,3 +4026,24 @@ fn an_empty_recent_list_says_so_beside_a_clock(cx: &mut TestAppContext) {
         Some("Compared pairs show up here.")
     );
 }
+
+/// The header draws the app's own icon, at a size that maps it 1:1 onto device pixels, not a
+/// text glyph that a font decides the look of.
+#[gpui_kit::test]
+fn the_header_draws_the_app_icon(cx: &mut TestAppContext) {
+    use duet_app::ui::brand::{brand_frame, brand_size};
+    assert_eq!(
+        [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0].map(brand_frame),
+        [26, 32, 40, 46, 52, 64, 78]
+    );
+    assert_eq!(brand_size(1.25), px(25.6));
+    let (handle, _workspace) = open(cx, Launch::Start);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("header-brand-icon").bounds().size.width,
+            px(26.)
+        );
+    })
+    .unwrap();
+}

@@ -143,6 +143,7 @@ actions!(
         SaveRight,
         SaveLeftAs,
         SaveRightAs,
+        SaveAs,
         CopyLeftPath,
         CopyRightPath,
         RevealLeftFile,
@@ -256,6 +257,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-v", PasteText, c),
         KeyBinding::new("ctrl-a", SelectAll, c),
         KeyBinding::new("ctrl-s", Save, c),
+        KeyBinding::new("ctrl-shift-s", SaveAs, c),
         KeyBinding::new("alt-right", CopyBlockRight, c),
         KeyBinding::new("alt-left", CopyBlockLeft, c),
         KeyBinding::new("ctrl-r", CopyBlockRight, c),
@@ -1018,6 +1020,7 @@ impl Render for TextView {
             .on_action(cx.listener(Self::on_paste))
             .on_action(cx.listener(Self::on_select_all))
             .on_action(cx.listener(Self::on_save))
+            .on_action(cx.listener(Self::on_save_as))
             .on_action(
                 cx.listener(|this, _: &OpenLeftFile, window, cx| this.pick_file(true, window, cx)),
             )

@@ -890,6 +890,7 @@ impl FolderView {
                 .id("folder-sync-list")
                 .test_support()
                 .max_h(px(300.))
+                .min_h(px(72.))
                 .overflow_y_scroll()
                 .px(px(8.))
                 .py(px(4.))
@@ -919,6 +920,9 @@ impl FolderView {
             .on_action(cx.listener(Self::sync_confirm))
             .w_full()
             .max_w(px(760.))
+            // No taller than the window: the list gives up its height first, then the rest
+            // scrolls, so Start stays on screen.
+            .max_h_full()
             .p(px(14.))
             .gap(px(8.))
             .rounded(px(10.))
@@ -932,17 +936,25 @@ impl FolderView {
                     .text_size(px(14.))
                     .child("Sync folders"),
             )
-            .child(h_flex().flex_wrap().gap(px(6.)).children(cards))
-            .child(scope)
             .child(
-                div()
-                    .id("folder-sync-summary")
+                v_flex()
+                    .id("folder-sync-fields")
                     .test_support()
-                    .aria_label(summary.clone())
-                    .child(summary),
+                    .min_h(px(72.))
+                    .overflow_y_scroll()
+                    .gap(px(8.))
+                    .child(h_flex().flex_wrap().gap(px(6.)).children(cards))
+                    .child(scope)
+                    .child(
+                        div()
+                            .id("folder-sync-summary")
+                            .test_support()
+                            .aria_label(summary.clone())
+                            .child(summary),
+                    )
+                    .children(list)
+                    .child(div().text_size(px(11.5)).text_color(p.dim).child(HELP)),
             )
-            .children(list)
-            .child(div().text_size(px(11.5)).text_color(p.dim).child(HELP))
             .child(
                 h_flex()
                     .justify_end()

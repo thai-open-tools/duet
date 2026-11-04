@@ -198,7 +198,7 @@ fn kpis_match_the_counts() {
         .collect();
     assert_eq!(values, ["9", "4", "2", "1", "2"]);
     assert!(page.contains("<div class=\"p\">Mismatched 7 (78%)</div>"));
-    assert!(page.contains("Including 1 that differ only in unimportant parts"));
+    assert!(page.contains("Including 1 that differs only in unimportant parts"));
     assert!(page.contains("Only in IWT"));
     assert!(page.contains("Not in PRD"));
     assert!(page.contains(
@@ -577,4 +577,9 @@ fn the_legend_explains_the_masking() {
     let page = html(&[item("a.txt", ItemState::Different)], Some(&lines), &opts);
     assert!(!page.contains("hidden #xxxx"));
     assert!(!page.contains("look like passwords"));
+}
+
+#[test]
+fn the_live_count_says_one_file_not_one_files() {
+    assert!(JS.contains(r#"(n===1?" file":" files")"#));
 }

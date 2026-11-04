@@ -65,6 +65,40 @@ async fn the_choice_buttons_fill_the_result_and_mark_the_tab_dirty(cx: &mut Test
 }
 
 #[gpui_kit::test]
+async fn an_automatic_part_opens_with_a_row_for_each_of_its_lines(cx: &mut TestAppContext) {
+    let base = "a\nb\nm\nc\nd\nz\n";
+    let (_dir, l, b, r) = write_set("a\nX\nm\nP\nQ\nz\n", base, base);
+    let set = paths(&l, &b, &r);
+    let (handle, workspace) = open_test_window(cx, move |window, cx| {
+        cx.new(|cx| Workspace::new(Launch::Merge(set), window, cx))
+    });
+    let view = workspace.read_with(cx, |w, _| match w.tabs().active() {
+        Some(TabItem::Merge(view)) => view.clone(),
+        _ => panic!("expected a merge tab"),
+    });
+    // No `draw` here: under test a dirty window draws by itself when effects flush, and the
+    // frame that made the fields is the one to read. An explicit draw is a second frame, which
+    // the real window never gets: a notify during paint schedules nothing.
+    for _ in 0..2_000 {
+        if view.read_with(cx, |v, _| v.field_for_test(3).is_some()) {
+            break;
+        }
+        cx.executor().timer(Duration::from_millis(10)).await;
+    }
+    assert_eq!(result_text(cx, &view, 1).as_deref(), Some("X"));
+    assert_eq!(result_text(cx, &view, 3).as_deref(), Some("P\nQ"));
+    let height = |cx: &mut TestAppContext, chunk: usize| {
+        bounds_of(cx, handle, ("merge-result", chunk)).size.height
+    };
+    let (one_line, two_lines) = (height(cx, 1), height(cx, 3));
+    assert!(
+        two_lines > one_line,
+        "a part of two lines must not open clipped to one row: {two_lines:?} {one_line:?}"
+    );
+    assert!(!dirty(cx, &view), "opening the set is not an edit");
+}
+
+#[gpui_kit::test]
 async fn typing_in_a_result_field_is_an_edit_and_one_undo_step(cx: &mut TestAppContext) {
     let [l, b, r] = one_conflict();
     let (handle, view) = open_texts(cx, &l, &b, &r).await;

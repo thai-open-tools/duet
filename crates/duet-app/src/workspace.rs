@@ -11,7 +11,7 @@ use gpui_kit::{
     WindowAppearance, actions, div, prelude::*, px, transparent_black,
 };
 
-use crate::app::{recent_file, startup_elapsed};
+use crate::app::{APP_NAME, recent_file, startup_elapsed};
 use crate::folder::model::FolderFilter;
 use crate::folder::prefs::FolderPrefs;
 use crate::folder::view::{FolderEvent, FolderView};
@@ -26,6 +26,7 @@ use crate::start::{StartEvent, StartView};
 use crate::table::view::{TableEvent, TableView};
 use crate::tabs::{TabKey, TabSet, badge_text};
 use crate::text::view::{TextEvent, TextView};
+use crate::ui::brand::{brand_image, brand_size};
 use crate::ui::fonts::{Fonts, UI_SIZE};
 use crate::ui::icons;
 use crate::ui::style::{LdExt, TAB_RADIUS, ld_dot, ld_icon_button, ld_pill, ld_small_icon_button};
@@ -877,6 +878,7 @@ impl Workspace {
         p: &Palette,
         fonts: &Fonts,
         wide: bool,
+        scale: f32,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         h_flex()
@@ -896,15 +898,11 @@ impl Workspace {
                     .gap(px(9.))
                     .child(
                         div()
-                            .flex()
-                            .size(px(26.))
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(6.))
-                            .bg(p.accent)
-                            .text_color(p.accent_ink)
-                            .text_size(px(15.))
-                            .child("⇌"),
+                            .id("header-brand-icon")
+                            .test_support()
+                            .flex_none()
+                            .size(brand_size(scale))
+                            .child(gpui_kit::img(brand_image(scale)).size_full()),
                     )
                     // No letter-spacing in gpui: four letters 2.3 px apart (LocalDiff's .18em).
                     .child(
@@ -1257,8 +1255,8 @@ impl Render for Workspace {
             .iter()
             .find(|(i, _, _)| Some(*i) == self.tabs.active_index())
             .map_or_else(
-                || "duet".to_owned(),
-                |(_, key, _)| format!("{} — duet", key.title()),
+                || APP_NAME.to_owned(),
+                |(_, key, _)| format!("{} — {APP_NAME}", key.title()),
             );
         if title != self.title {
             window.set_window_title(&title);
@@ -1288,7 +1286,7 @@ impl Render for Workspace {
         }
         let fonts = Fonts::current(cx);
         let wide = header_pill_visible(window.viewport_size().width);
-        let header = self.render_header(&palette, &fonts, wide, cx);
+        let header = self.render_header(&palette, &fonts, wide, window.scale_factor(), cx);
         let strip = self.render_tabs(&palette, cx);
         let content = match self.tabs.active() {
             Some(TabItem::Start(view)) => view.clone().into_any_element(),
