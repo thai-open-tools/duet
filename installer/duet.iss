@@ -13,14 +13,19 @@
 #define AppVersion GetVersionNumbersString(AddBackslash(BinDir) + AppExe)
 ; GetVersionNumbersString gives 0.1.0.0; the release name uses the three-part version
 #define ShortVersion Copy(AppVersion, 1, RPos(".", AppVersion) - 1)
-#define RepoUrl "https://github.com/ball46/duet"
+#define RepoUrl "https://github.com/thai-open-tools/duet"
 ; A test build can install side by side with a real one: ISCC /DAppName=duet-test /DAppGuid=<another GUID>
+; (it must have its own AppGuid, or it upgrades the real install). Its Explorer verbs get the key
+; prefix FileBase and the menu text gets " [AppName]", so it never writes, overwrites or, on
+; uninstall, deletes the real install's keys.
 #ifndef AppName
   #define AppName "duet compare"
   #define FileBase "duet"
+  #define VerbTag ""
   #define RealBuild
 #else
   #define FileBase AppName
+  #define VerbTag " [" + AppName + "]"
 #endif
 #ifndef AppGuid
   #define AppGuid "F2E1350D-7680-4731-B9BC-1D5599BB450C"
@@ -107,10 +112,17 @@ en.ExtraTasks=More:
 th.ExtraTasks=เพิ่มเติม:
 en.OpenGuide=Report a problem or ask for a feature on GitHub
 th.OpenGuide=แจ้งปัญหาหรือขอฟีเจอร์ใหม่บน GitHub
+en.ShellVerbs=Add "Select as left" and "Compare to selected left" to the Explorer right-click menu
+th.ShellVerbs=เพิ่ม "เลือกเป็นฝั่งซ้าย" และ "เทียบกับฝั่งซ้ายที่เลือกไว้" ในเมนูคลิกขวาของ Explorer
+en.VerbSelectLeft=Select as left
+th.VerbSelectLeft=เลือกเป็นฝั่งซ้าย
+en.VerbCompareTo=Compare to selected left
+th.VerbCompareTo=เทียบกับฝั่งซ้ายที่เลือกไว้
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "addtopath"; Description: "{cm:AddToPath}"; GroupDescription: "{cm:ExtraTasks}"; Flags: unchecked
+Name: "shellverbs"; Description: "{cm:ShellVerbs}"; GroupDescription: "{cm:ExtraTasks}"
 
 [Files]
 Source: "{#BinDir}\duet.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -133,6 +145,30 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "Compare
 [Registry]
 ; duet-cli on PATH: the current user's PATH, or the machine's when installed for all users
 Root: HKA; Subkey: "{code:EnvKey}"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: PathMissing(ExpandConstant('{app}'))
+; Explorer right-click verbs (files and folders): the same keys and command lines as
+; `duet --register-shell` (crates\duet-app\src\shell_verbs.rs). MultiSelectModel=Single hides them
+; when several items are selected. HKA is HKCU for a per-user install, HKLM for all users.
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.SelectLeft"; ValueType: string; ValueData: "{cm:VerbSelectLeft}{#VerbTag}"; Flags: uninsdeletekey; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.SelectLeft"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.SelectLeft"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Single"; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.SelectLeft\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --select-left ""%1"""; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.CompareTo"; ValueType: string; ValueData: "{cm:VerbCompareTo}{#VerbTag}"; Flags: uninsdeletekey; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.CompareTo"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.CompareTo"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Single"; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.CompareTo\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --compare-to ""%1"""; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.SelectLeft"; ValueType: string; ValueData: "{cm:VerbSelectLeft}{#VerbTag}"; Flags: uninsdeletekey; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.SelectLeft"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.SelectLeft"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Single"; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.SelectLeft\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --select-left ""%1"""; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.CompareTo"; ValueType: string; ValueData: "{cm:VerbCompareTo}{#VerbTag}"; Flags: uninsdeletekey; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.CompareTo"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.CompareTo"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Single"; Tasks: shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.CompareTo\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --compare-to ""%1"""; Tasks: shellverbs
+; Setup run again with the task unticked removes the verbs an earlier run left.
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.SelectLeft"; ValueType: none; Flags: deletekey; Tasks: not shellverbs
+Root: HKA; Subkey: "Software\Classes\*\shell\{#FileBase}.CompareTo"; ValueType: none; Flags: deletekey; Tasks: not shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.SelectLeft"; ValueType: none; Flags: deletekey; Tasks: not shellverbs
+Root: HKA; Subkey: "Software\Classes\Directory\shell\{#FileBase}.CompareTo"; ValueType: none; Flags: deletekey; Tasks: not shellverbs
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent

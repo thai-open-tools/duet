@@ -4,6 +4,7 @@
 use std::ops::Range;
 
 use super::*;
+use crate::i18n::tr;
 use crate::pathbar::{path_bar_click, path_input};
 use crate::text::menu::path_menu;
 use crate::ui::menu::fill as fill_menu;
@@ -153,7 +154,7 @@ impl TextView {
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.begin_path_edit(left, window, cx)
                             }))
-                            .child("untitled")
+                            .child(tr("untitled"))
                             .into_any_element(),
                         None => path_bar_click(
                             id,

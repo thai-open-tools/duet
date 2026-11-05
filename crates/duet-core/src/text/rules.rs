@@ -67,7 +67,11 @@ fn short_reason(err: &regex::Error) -> String {
         .lines()
         .rev()
         .find_map(|line| line.trim().strip_prefix("error: "))
-        .unwrap_or_else(|| full.lines().next().unwrap_or("invalid pattern"));
+        .unwrap_or_else(|| {
+            full.lines()
+                .next()
+                .unwrap_or(crate::i18n::tr_key("invalid pattern"))
+        });
     line.trim().to_owned()
 }
 

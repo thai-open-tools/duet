@@ -27,6 +27,12 @@ pub struct AppPaths {
 
 impl Global for AppPaths {}
 
+/// The temp folder: a compare with a side under it is not added to the recent list. `run` sets
+/// it; without it (tests) only git's merge temp file names are skipped.
+pub struct TempRoot(pub PathBuf);
+
+impl Global for TempRoot {}
+
 pub fn recent_file(cx: &App) -> Option<PathBuf> {
     cx.try_global::<AppPaths>()
         .map(|paths| paths.data_dir.join("recent.txt"))
@@ -271,6 +277,7 @@ pub fn assets() -> impl AssetSource {
 }
 
 pub fn run(launch: Launch) {
+    crate::i18n::share_process_wide();
     let application = gpui_kit::application().with_assets(assets());
     application.run(move |cx| {
         gpui_kit::init(cx);
@@ -287,6 +294,7 @@ pub fn run(launch: Launch) {
             cx,
         );
         cx.set_global(AppPaths { data_dir });
+        cx.set_global(TempRoot(std::env::temp_dir()));
         cx.bind_keys(key_bindings());
         bind_shortcuts(cx);
         cx.on_keyboard_layout_change(bind_shortcuts).detach();

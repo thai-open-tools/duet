@@ -5,13 +5,15 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::h_flex;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::{
     AnyElement, AnyWindowHandle, App, ClickEvent, ClipboardItem, Context, Div, Entity, FontWeight,
     SharedString, Subscription, Window, div, prelude::*, relative,
 };
 
+use crate::i18n::{tr, tr_key, trf};
 use crate::palette::Palette;
+use crate::ui::edit_menu::ld_input;
 use crate::ui::icons;
 use crate::ui::style::{LdExt as _, ld_small_icon_button, ld_tip};
 
@@ -27,11 +29,11 @@ pub fn split_path(path: &Path) -> (String, String) {
     }
 }
 
-pub const NOT_FULL_PATH: &str = "Type a full path, such as C:\\folder\\file.txt.";
-pub const FOLDER_DROP_NOTICE: &str = "Drop files here; folders open in a folder compare.";
+pub const NOT_FULL_PATH: &str = tr_key("Type a full path, such as C:\\folder\\file.txt.");
+pub const FOLDER_DROP_NOTICE: &str = tr_key("Drop files here; folders open in a folder compare.");
 
 pub fn not_a_file(path: &str) -> String {
-    format!("Not a file: {path}.")
+    trf("Not a file: {}.", &[&path])
 }
 
 /// A typed path box's text as an existing file: cleaned (`clean_typed`), absolute, and made
@@ -40,7 +42,7 @@ pub fn typed_file(text: &str) -> Result<PathBuf, String> {
     let typed = clean_typed(text);
     let path = PathBuf::from(typed);
     if !typed.is_empty() && !path.is_absolute() {
-        return Err(NOT_FULL_PATH.to_owned());
+        return Err(tr(NOT_FULL_PATH).to_owned());
     }
     let path = std::path::absolute(&path).unwrap_or(path);
     if typed.is_empty() || !path.is_file() {
@@ -58,7 +60,7 @@ pub fn dropped_files(paths: &[PathBuf]) -> Result<&[PathBuf], String> {
 pub fn dropped_files_up_to(paths: &[PathBuf], n: usize) -> Result<&[PathBuf], String> {
     let used = &paths[..paths.len().min(n)];
     match used.iter().find(|p| !p.is_file()) {
-        Some(bad) if bad.is_dir() => Err(FOLDER_DROP_NOTICE.to_owned()),
+        Some(bad) if bad.is_dir() => Err(tr(FOLDER_DROP_NOTICE).to_owned()),
         Some(bad) => Err(not_a_file(&bad.display().to_string())),
         None => Ok(used),
     }
@@ -162,7 +164,7 @@ pub fn path_input(id: &str, edit: &PathEdit, palette: &Palette) -> AnyElement {
         .flex_1()
         .min_w_0()
         .text_color(palette.text)
-        .child(Input::new(&edit.input).aria_label("Path"))
+        .child(ld_input(&edit.input).aria_label(tr("Path")))
         .into_any_element()
 }
 
@@ -218,7 +220,7 @@ pub fn path_bar_click(
             ld_small_icon_button(
                 SharedString::from(format!("{id}-copy")),
                 icons::COPY_PATH,
-                "Copy path",
+                tr("Copy path"),
                 palette,
             )
             .ld_click(true, move |_, _, cx| {

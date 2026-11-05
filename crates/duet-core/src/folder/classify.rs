@@ -24,21 +24,30 @@ pub struct TextFormat {
 }
 
 impl TextFormat {
-    /// `eolDesc` (`js:402`): the line endings, then what else is unusual, then the encoding.
+    /// What the line endings are called, as a key the UI can draw in its language.
+    pub fn eol_text(&self) -> &'static str {
+        match self.eol {
+            EolStyle::CrLf => crate::i18n::tr_key("CRLF (Windows)"),
+            EolStyle::Lf => crate::i18n::tr_key("LF (Linux)"),
+            EolStyle::Cr => crate::i18n::tr_key("CR (old Mac)"),
+            EolStyle::Mixed => crate::i18n::tr_key("mixed line endings"),
+            EolStyle::None => crate::i18n::tr_key("one line"),
+        }
+    }
+
+    /// The words `describe` adds after the line endings, as keys the UI can draw.
+    pub const NO_FINAL_NEWLINE: &'static str = crate::i18n::tr_key(", no final newline");
+    pub const WITH_BOM: &'static str = crate::i18n::tr_key(", BOM");
+
+    /// `eolDesc` (`js:402`): the line endings, then what else is unusual, then the encoding. In
+    /// this thread's language, English with no scope: it is the words a report writes.
     pub fn describe(&self) -> String {
-        let eol = match self.eol {
-            EolStyle::CrLf => "CRLF (Windows)",
-            EolStyle::Lf => "LF (Linux)",
-            EolStyle::Cr => "CR (old Mac)",
-            EolStyle::Mixed => "mixed line endings",
-            EolStyle::None => "one line",
-        };
-        let mut out = eol.to_owned();
+        let mut out = crate::i18n::tr(self.eol_text()).to_owned();
         if !self.final_newline {
-            out.push_str(", no final newline");
+            out.push_str(crate::i18n::tr(Self::NO_FINAL_NEWLINE));
         }
         if self.bom {
-            out.push_str(", BOM");
+            out.push_str(crate::i18n::tr(Self::WITH_BOM));
         }
         out.push_str(", ");
         out.push_str(self.encoding.name());

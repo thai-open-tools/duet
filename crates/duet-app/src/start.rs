@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu};
 use gpui_kit::component::{h_flex, v_flex};
@@ -18,13 +18,16 @@ use gpui_kit::{
 
 use crate::app::recent_file;
 use crate::help::topics::{self, HelpLang};
+use crate::i18n::{paired, tr, tr_key, trf};
 use crate::launch::{Launch, MergePaths, classify};
 use crate::palette::Palette;
 use crate::recent::{self, Recent, RecentKind};
 use crate::settings;
+use crate::ui::edit_menu::ld_input;
 use crate::ui::fonts::Fonts;
 use crate::ui::icons;
 use crate::ui::menu::{MenuEntry, fill};
+use crate::ui::prose::ProseExt as _;
 use crate::ui::style::{
     CARD_RADIUS, LdExt, ld_button, ld_card, ld_ghost, ld_icon, ld_icon_label_button, ld_kbd,
     ld_primary, ld_small_icon_button,
@@ -36,28 +39,28 @@ use duet_core::kind::CompareKind;
 pub const SHORTCUTS: &[(&[&str], &str)] = &[
     (
         &["text::PrevChange", "text::NextChange"],
-        "Previous or next difference",
+        paired("Previous or next difference"),
     ),
     (
         &["text::FirstChange", "text::LastChange"],
-        "First or last difference",
+        paired("First or last difference"),
     ),
     (
         &["text::CopyBlockRight", "text::CopyBlockLeft"],
-        "Copy the block to the right or left",
+        paired("Copy the block to the right or left"),
     ),
-    (&["text::Undo", "text::Redo"], "Undo or redo"),
-    (&["text::Save"], "Save the edited side"),
+    (&["text::Undo", "text::Redo"], paired("Undo or redo")),
+    (&["text::Save"], paired("Save the edited side")),
     (
         &["text::OpenFind", "text::FindNext"],
-        "Find, then the next match",
+        paired("Find, then the next match"),
     ),
-    (&["text::OpenGoTo"], "Go to line"),
+    (&["text::OpenGoTo"], paired("Go to line")),
     (
         &["text::Reload"],
-        "Reload the files, or compare the folders again",
+        paired("Reload the files, or compare the folders again"),
     ),
-    (&["text::SwapSides"], "Swap left and right"),
+    (&["text::SwapSides"], paired("Swap left and right")),
     (
         &[
             "text::FilterAll",
@@ -65,47 +68,62 @@ pub const SHORTCUTS: &[(&[&str], &str)] = &[
             "text::FilterContext",
             "text::FilterSame",
         ],
-        "Show all, differences, context or same",
+        paired("Show all, differences, context or same"),
     ),
-    (&["folder::DeleteSelected"], "Delete the selected files"),
+    (
+        &["folder::DeleteSelected"],
+        paired("Delete the selected files"),
+    ),
     (
         &["workspace::NewTab", "workspace::CloseTab"],
-        "New tab or close tab",
+        paired("New tab or close tab"),
     ),
-    (&["workspace::NextTab"], "Next tab"),
-    (&["workspace::OpenHelp"], "Help"),
-    (&["text::Escape"], "Cancel, close a bar or go back"),
+    (&["workspace::NextTab"], paired("Next tab")),
+    (&["workspace::OpenHelp"], paired("Help")),
+    (&["text::Escape"], paired("Cancel, close a bar or go back")),
 ];
 
 /// The sheet's rows in Thai, for the help (H4): each English label beside its Thai twin, in
 /// `SHORTCUTS` order.
 pub const SHORTCUTS_TH: &[(&str, &str)] = &[
-    ("Previous or next difference", "จุดต่างก่อนหน้า / ถัดไป"),
-    ("First or last difference", "จุดต่างแรก / สุดท้าย"),
     (
-        "Copy the block to the right or left",
-        "คัดลอกบล็อกไปขวา / ซ้าย",
+        paired("Previous or next difference"),
+        paired("จุดต่างก่อนหน้า / ถัดไป"),
     ),
-    ("Undo or redo", "ย้อนกลับ / ทำซ้ำ"),
-    ("Save the edited side", "บันทึกฝั่งที่แก้ไข"),
-    ("Find, then the next match", "ค้นหา แล้วไปคำที่พบถัดไป"),
-    ("Go to line", "ไปบรรทัด"),
     (
-        "Reload the files, or compare the folders again",
-        "โหลดไฟล์ใหม่ หรือเทียบโฟลเดอร์อีกครั้ง",
+        paired("First or last difference"),
+        paired("จุดต่างแรก / สุดท้าย"),
     ),
-    ("Swap left and right", "สลับซ้าย-ขวา"),
     (
-        "Show all, differences, context or same",
-        "แสดงทั้งหมด / เฉพาะที่ต่าง / ต่างพร้อมบริบท / เฉพาะที่เหมือน",
+        paired("Copy the block to the right or left"),
+        paired("คัดลอกบล็อกไปขวา / ซ้าย"),
     ),
-    ("Delete the selected files", "ลบไฟล์ที่เลือก (ไปถังขยะ)"),
-    ("New tab or close tab", "แท็บใหม่ / ปิดแท็บ"),
-    ("Next tab", "แท็บถัดไป"),
-    ("Help", "เปิดคู่มือนี้"),
+    (paired("Undo or redo"), paired("ย้อนกลับ / ทำซ้ำ")),
+    (paired("Save the edited side"), paired("บันทึกฝั่งที่แก้ไข")),
     (
-        "Cancel, close a bar or go back",
-        "ยกเลิก / ปิดแถบ / กลับหน้าก่อน",
+        paired("Find, then the next match"),
+        paired("ค้นหา แล้วไปจุดที่พบถัดไป"),
+    ),
+    (paired("Go to line"), paired("ไปบรรทัด")),
+    (
+        paired("Reload the files, or compare the folders again"),
+        paired("โหลดไฟล์ใหม่ หรือเทียบโฟลเดอร์อีกครั้ง"),
+    ),
+    (paired("Swap left and right"), paired("สลับซ้าย-ขวา")),
+    (
+        paired("Show all, differences, context or same"),
+        paired("แสดงทั้งหมด / เฉพาะที่ต่าง / จุดต่างพร้อมบรรทัดรอบข้าง / เฉพาะที่เหมือน"),
+    ),
+    (
+        paired("Delete the selected files"),
+        paired("ลบไฟล์ที่เลือก (ไปถังขยะ)"),
+    ),
+    (paired("New tab or close tab"), paired("แท็บใหม่ / ปิดแท็บ")),
+    (paired("Next tab"), paired("แท็บถัดไป")),
+    (paired("Help"), paired("เปิดคู่มือนี้")),
+    (
+        paired("Cancel, close a bar or go back"),
+        paired("ยกเลิก / ปิดแถบ / กลับหน้าก่อน"),
     ),
 ];
 
@@ -114,27 +132,27 @@ pub const SHORTCUTS_TH: &[(&str, &str)] = &[
 pub const START_SHORTCUTS: &[(&[&str], &str)] = &[
     (
         &["text::PrevChange", "text::NextChange"],
-        "Previous or next difference",
+        paired("Previous or next difference"),
     ),
     (
         &["text::CopyBlockRight", "text::CopyBlockLeft"],
-        "Copy the block to the right or left",
+        paired("Copy the block to the right or left"),
     ),
-    (&["text::Undo", "text::Redo"], "Undo or redo"),
-    (&["text::Save"], "Save the edited side"),
+    (&["text::Undo", "text::Redo"], paired("Undo or redo")),
+    (&["text::Save"], paired("Save the edited side")),
     (
         &["text::OpenFind", "text::FindNext"],
-        "Find, then the next match",
+        paired("Find, then the next match"),
     ),
     (
         &["text::Reload"],
-        "Reload the files, or compare the folders again",
+        paired("Reload the files, or compare the folders again"),
     ),
     (
         &["workspace::NewTab", "workspace::CloseTab"],
-        "New tab or close tab",
+        paired("New tab or close tab"),
     ),
-    (&["workspace::OpenHelp"], "Help"),
+    (&["workspace::OpenHelp"], paired("Help")),
 ];
 
 /// Each row's keys, "F7 / F8": the first binding of each action, as Windows names it.
@@ -202,22 +220,13 @@ pub const WELCOME_KEY: &str = "start.welcome";
 /// The welcome card shows while `start.welcome` is below this.
 pub const WELCOME_REV: u64 = 1;
 
-/// Whether the welcome card is due, and in which language: while `start.welcome` (a number)
-/// is below `WELCOME_REV`, in the help's language (U15). No settings file, no key or a value
-/// that is not a number shows it.
-pub fn welcome_due(settings: Option<&Path>) -> Option<HelpLang> {
-    let saved = settings.map(settings::read_all).unwrap_or_default();
-    let seen = saved
-        .get(WELCOME_KEY)
-        .and_then(serde_json::Value::as_f64)
+/// Whether the welcome card is due: while `start.welcome` (a number) is below `WELCOME_REV`
+/// (U15). No settings file, no key or a value that is not a number shows it.
+pub fn welcome_due(settings: Option<&Path>) -> bool {
+    let seen = settings
+        .and_then(|path| settings::get_f64(path, WELCOME_KEY))
         .unwrap_or(0.);
-    (seen < WELCOME_REV as f64).then(|| {
-        saved
-            .get(HelpLang::KEY)
-            .and_then(serde_json::Value::as_str)
-            .and_then(HelpLang::from_code)
-            .unwrap_or_default()
-    })
+    seen < WELCOME_REV as f64
 }
 
 /// Set when the welcome card is dismissed, so this run's later Start tabs keep it hidden even
@@ -226,12 +235,9 @@ struct WelcomeSeen;
 
 impl Global for WelcomeSeen {}
 
-/// The welcome card's language while it is due.
-fn welcome_now(cx: &App) -> Option<HelpLang> {
-    if cx.has_global::<WelcomeSeen>() {
-        return None;
-    }
-    welcome_due(settings::settings_file(cx).as_deref())
+/// Whether the welcome card is due in this run.
+fn welcome_now(cx: &App) -> bool {
+    !cx.has_global::<WelcomeSeen>() && welcome_due(settings::settings_file(cx).as_deref())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -262,8 +268,8 @@ pub struct StartView {
     menu_recent: Option<usize>,
     /// The whole recent list shows, not its first `RECENT_SHOWN`; not saved (U13).
     all_recent: bool,
-    /// The welcome card's language while it shows (U15).
-    welcome: Option<HelpLang>,
+    /// The welcome card shows (U15).
+    welcome: bool,
     /// Counts the checks started; a check that is not the newest is stale.
     check_generation: u64,
     /// Set by the binary-files card: the next compare opens its files as this kind, whatever
@@ -286,8 +292,9 @@ impl Focusable for StartView {
 
 impl StartView {
     pub fn new(error: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let left = cx.new(|cx| InputState::new(window, cx).placeholder("Left file or folder"));
-        let right = cx.new(|cx| InputState::new(window, cx).placeholder("Right file or folder"));
+        let left = cx.new(|cx| InputState::new(window, cx).placeholder(tr("Left file or folder")));
+        let right =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr("Right file or folder")));
         let on_input = |this: &mut Self,
                         _: &Entity<InputState>,
                         event: &InputEvent,
@@ -386,20 +393,30 @@ impl StartView {
         &self.recent
     }
 
-    /// The welcome card's language while it shows (U15).
+    /// The welcome card's language while it shows (U15): the UI's.
     pub fn welcome(&self) -> Option<HelpLang> {
-        self.welcome
+        self.welcome.then(HelpLang::current)
     }
 
-    /// Reads the welcome card's state again as the tab is shown: the help's language may have
-    /// changed since, or another window dismissed the card.
+    /// The language changed: an error shown here is one-shot feedback in the old language, so it
+    /// goes, and the two boxes' placeholders are set again (they are stored in the boxes).
+    pub fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.error = None;
+        for (input, key) in [
+            (&self.left, tr_key("Left file or folder")),
+            (&self.right, tr_key("Right file or folder")),
+        ] {
+            input.update(cx, |state, cx| state.set_placeholder(tr(key), window, cx));
+        }
+        cx.notify();
+    }
+
+    /// Reads the welcome card's state again as the tab is shown: another window may have
+    /// dismissed the card.
     pub fn reload_welcome(&mut self, cx: &mut Context<Self>) {
-        if self.welcome.is_some() {
-            let now = welcome_now(cx);
-            if now != self.welcome {
-                self.welcome = now;
-                cx.notify();
-            }
+        if self.welcome && !welcome_now(cx) {
+            self.welcome = false;
+            cx.notify();
         }
     }
 
@@ -411,14 +428,14 @@ impl StartView {
         {
             tracing::warn!(%err, "could not save the welcome card's dismissal");
         }
-        self.welcome = None;
+        self.welcome = false;
         cx.emit(StartEvent::WelcomeDismissed);
         cx.notify();
     }
 
     /// Another Start tab dismissed the welcome card.
     pub fn hide_welcome(&mut self, cx: &mut Context<Self>) {
-        if self.welcome.take().is_some() {
+        if std::mem::take(&mut self.welcome) {
             cx.notify();
         }
     }
@@ -483,7 +500,9 @@ impl StartView {
                 }
                 let launch = match (launch, forced) {
                     (
-                        Launch::Files { left, right } | Launch::Picture { left, right },
+                        Launch::Files { left, right }
+                        | Launch::Picture { left, right }
+                        | Launch::Table { left, right },
                         Some(CompareKind::Hex),
                     ) => Launch::Hex { left, right },
                     (
@@ -495,7 +514,8 @@ impl StartView {
                     (
                         Launch::Files { left, right }
                         | Launch::Hex { left, right }
-                        | Launch::Picture { left, right },
+                        | Launch::Picture { left, right }
+                        | Launch::Table { left, right },
                         Some(CompareKind::Picture),
                     ) => Launch::Picture { left, right },
                     (other, _) => other,
@@ -529,10 +549,10 @@ impl StartView {
         };
         let (open, remove) = (self.weak.clone(), self.weak.clone());
         vec![
-            MenuEntry::click("Open", move |_, cx| {
+            MenuEntry::click(tr("Open"), move |_, cx| {
                 open.update(cx, |this, cx| this.open_recent(i, cx)).ok();
             }),
-            MenuEntry::click("Remove from list", move |_, cx| {
+            MenuEntry::click(tr("Remove from list"), move |_, cx| {
                 remove.update(cx, |this, cx| this.remove_recent(i, cx)).ok();
             }),
         ]
@@ -650,7 +670,7 @@ impl StartView {
         let left = clean_path(&self.left.read(cx).value()).to_owned();
         let right = clean_path(&self.right.read(cx).value()).to_owned();
         if left.is_empty() || right.is_empty() {
-            self.error = Some("Choose two files or two folders.".into());
+            self.error = Some(tr("Choose two files or two folders.").into());
             cx.notify();
             return;
         }
@@ -706,12 +726,12 @@ impl StartView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let state = if left_side { &self.left } else { &self.right };
-        let id = |suffix: &str| {
-            SharedString::from(format!(
-                "start-{}-{suffix}",
-                if left_side { "left" } else { "right" }
-            ))
+        let side = if left_side {
+            "start-left"
+        } else {
+            "start-right"
         };
+        let id = |suffix: &str| SharedString::from(format!("{side}-{suffix}"));
         h_flex()
             .id(id("row"))
             .test_support()
@@ -727,25 +747,25 @@ impl StartView {
                     .w(px(44.))
                     .flex_none()
                     .text_color(p.muted)
-                    .child(label),
+                    .child(tr(label)),
             )
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(Input::new(state).aria_label(if left_side {
-                        "Left path"
+                    .child(ld_input(state).aria_label(if left_side {
+                        tr("Left path")
                     } else {
-                        "Right path"
+                        tr("Right path")
                     })),
             )
-            .child(ld_button(id("file"), "File…", p).ld_click(
+            .child(ld_button(id("file"), tr("File…"), p).ld_click(
                 true,
                 cx.listener(move |this, _: &ClickEvent, window, cx| {
                     this.browse(left_side, false, false, window, cx)
                 }),
             ))
-            .child(ld_button(id("folder"), "Folder…", p).ld_click(
+            .child(ld_button(id("folder"), tr("Folder…"), p).ld_click(
                 true,
                 cx.listener(move |this, _: &ClickEvent, window, cx| {
                     this.browse(left_side, true, false, window, cx)
@@ -753,7 +773,7 @@ impl StartView {
             ))
     }
 
-    /// The welcome card (U15), in the help's language and drawn as the help draws its prose
+    /// The welcome card (U15), in the UI's language and drawn as the help draws its prose
     /// (H6): the title and three lines, then the guide and dismiss buttons.
     fn render_welcome(
         &self,
@@ -840,7 +860,7 @@ impl StartView {
                 .test_support()
                 .text_size(px(12.5))
                 .text_color(p.del)
-                .child(error)
+                .prose(error)
         });
         let accent = p.accent;
         v_flex()
@@ -865,21 +885,21 @@ impl StartView {
                             .min_w_0()
                             .text_size(px(12.5))
                             .text_color(p.muted)
-                            .child("Drop two files or folders here, or type their paths"),
+                            .prose(tr("Drop two files or folders here, or type their paths")),
                     ),
             )
-            .child(self.path_row("Left", true, p, cx))
-            .child(self.path_row("Right", false, p, cx))
+            .child(self.path_row(tr_key("Left"), true, p, cx))
+            .child(self.path_row(tr_key("Right"), false, p, cx))
             .child(
                 h_flex()
                     .gap(px(10.))
                     .items_center()
                     .child(div().flex_1().min_w_0().children(error))
                     .child(
-                        ld_icon_label_button(PASTE_TEXT.0, icons::PASTE_TEXT, PASTE_TEXT.1, p)
+                        ld_icon_label_button(PASTE_TEXT.0, icons::PASTE_TEXT, tr(PASTE_TEXT.1), p)
                             .as_ghost(p)
                             .ld_tooltip(
-                                "Two empty sides to type or paste into; you can open files into either side later",
+                                tr("Two empty sides to type or paste into; you can open files into either side later"),
                             )
                             // Two empty paths: the untitled pair (R15).
                             .ld_click(
@@ -892,7 +912,7 @@ impl StartView {
                                 }),
                             ),
                     )
-                    .child(ld_primary("start-compare", "Compare", p).ld_click(
+                    .child(ld_primary("start-compare", tr("Compare"), p).ld_click(
                         true,
                         cx.listener(|this, _: &ClickEvent, _, cx| this.compare(cx)),
                     )),
@@ -908,7 +928,7 @@ impl StartView {
     ) -> impl IntoElement + use<> {
         let (id, title, text) = mode_copy(mode);
         let (accent, panel2) = (p.accent, p.panel2);
-        ld_card(id, title, p)
+        ld_card(id, tr(title), p)
             .flex()
             .flex_row()
             .items_start()
@@ -952,14 +972,14 @@ impl StartView {
                         div()
                             .text_size(px(14.))
                             .font_weight(FontWeight::BOLD)
-                            .child(title),
+                            .child(tr(title)),
                     )
                     .child(
                         div()
                             .text_size(px(12.))
                             .line_height(relative(1.4))
                             .text_color(p.muted)
-                            .child(text),
+                            .prose(tr(text)),
                     ),
             )
     }
@@ -985,9 +1005,9 @@ impl StartView {
             .items_center()
             .justify_between()
             .h(px(22.))
-            .child(heading("Recent", p))
+            .child(heading(tr("Recent"), p))
             .children((!self.recent.is_empty()).then(|| {
-                ld_button("start-recent-clear", "Clear", p)
+                ld_button("start-recent-clear", tr("Clear"), p)
                     .ld_small()
                     .ld_click(
                         true,
@@ -1027,12 +1047,12 @@ impl StartView {
                     h_flex()
                         .id("start-recent-empty")
                         .test_support()
-                        .aria_label(NO_RECENT)
+                        .aria_label(tr(NO_RECENT))
                         .gap(px(8.))
                         .text_size(px(12.5))
                         .text_color(p.dim)
                         .child(ld_icon(icons::NO_RECENT, 16.))
-                        .child(NO_RECENT),
+                        .child(div().flex_1().min_w_0().prose(tr(NO_RECENT))),
                 )
                 .context_menu(menu);
         }
@@ -1051,16 +1071,18 @@ impl StartView {
                     // The name reads as before: a merge names its base between the sides, as the
                     // merge tab lays them out.
                     let name = match &entry.base {
-                        Some(base) => format!(
-                            "{kind}: {}, {} and {}",
-                            entry.left.display(),
-                            base.display(),
-                            entry.right.display()
+                        Some(base) => trf(
+                            "{}: {}, {} and {}",
+                            &[
+                                &kind,
+                                &entry.left.display(),
+                                &base.display(),
+                                &entry.right.display(),
+                            ],
                         ),
-                        None => format!(
-                            "{kind}: {} and {}",
-                            entry.left.display(),
-                            entry.right.display()
+                        None => trf(
+                            "{}: {} and {}",
+                            &[&kind, &entry.left.display(), &entry.right.display()],
                         ),
                     };
                     let line = entry.line();
@@ -1137,7 +1159,7 @@ impl StartView {
                                     ld_small_icon_button(
                                         ("start-recent-remove", i),
                                         icons::CLOSE,
-                                        "Remove from the list",
+                                        tr("Remove from the list"),
                                         p,
                                     )
                                     .w(px(REMOVE_WIDTH))
@@ -1161,9 +1183,9 @@ impl StartView {
     fn render_recent_more(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         (self.recent.len() > RECENT_SHOWN).then(|| {
             let label = if self.all_recent {
-                "Show fewer".to_owned()
+                tr("Show fewer").to_owned()
             } else {
-                format!("Show all ({})", self.recent.len())
+                trf("Show all ({})", &[&self.recent.len()])
             };
             h_flex().child(ld_ghost("start-recent-more", label, p).ld_small().ld_click(
                 true,
@@ -1182,7 +1204,7 @@ const REMOVE_WIDTH: f32 = 22.;
 const RECENT_HEIGHT: f32 = 32.;
 /// The recent entries shown until "Show all" (U13).
 const RECENT_SHOWN: usize = 8;
-const NO_RECENT: &str = "Compared pairs show up here.";
+const NO_RECENT: &str = tr_key("Compared pairs show up here.");
 /// The welcome card's title size.
 const WELCOME_TITLE_SIZE: f32 = 15.;
 /// The page's group, whose drag-over lights up the form (U12).
@@ -1199,40 +1221,42 @@ const TILES: [StartMode; 6] = [
 ];
 
 /// The form's "Paste text…" button: the untitled pair, under the old text card's id.
-const PASTE_TEXT: (&str, &str) = ("start-mode-text", "Paste text…");
+const PASTE_TEXT: (&str, &str) = ("start-mode-text", tr_key("Paste text…"));
 
 /// A tile's id, title and one-line description.
 fn mode_copy(mode: StartMode) -> (&'static str, &'static str, &'static str) {
     match mode {
         StartMode::Picture => (
             "start-mode-picture",
-            "Compare pictures",
-            "PNG, JPEG, GIF, BMP, WebP, ICO, TIFF or SVG, pixel by pixel.",
+            tr_key("Compare pictures"),
+            tr_key("PNG, JPEG, GIF, BMP, WebP, ICO, TIFF or SVG, pixel by pixel."),
         ),
         StartMode::Table => (
             "start-mode-table",
-            "Compare tables",
-            "CSV or TSV, cell by cell: rows paired by key or by order.",
+            tr_key("Compare tables"),
+            tr_key(
+                "CSV, TSV or Excel (.xlsx) sheets, cell by cell: rows paired by key or by order.",
+            ),
         ),
         StartMode::Hex => (
             "start-mode-hex",
-            "Compare binary files",
-            "Byte by byte, side by side, for any file.",
+            tr_key("Compare binary files"),
+            tr_key("Byte by byte, side by side, for any file."),
         ),
         StartMode::Folders => (
             "start-mode-folders",
-            "Compare folders",
-            "Two folder trees: what differs, what is missing, copy and delete.",
+            tr_key("Compare folders"),
+            tr_key("Two folder trees: what differs, what is missing, copy and delete."),
         ),
         StartMode::Merge => (
             "start-mode-merge",
-            "3-way merge",
-            "Combine two edited copies of a file with their common original.",
+            tr_key("3-way merge"),
+            tr_key("Combine two edited copies of a file with their common original."),
         ),
         StartMode::Files => (
             "start-mode-files",
-            "Compare files",
-            "Two text files side by side: changes, moved lines, edits and saves.",
+            tr_key("Compare files"),
+            tr_key("Two text files side by side: changes, moved lines, edits and saves."),
         ),
     }
 }
@@ -1269,6 +1293,19 @@ fn heading(text: &'static str, p: &Palette) -> Div {
         .child(text)
 }
 
+/// A sheet row's label in the UI's language. The Thai sits in `SHORTCUTS_TH`, in the order of
+/// `SHORTCUTS`: it is not in the UI table, where "Help" would read as a tab title.
+fn sheet_label(english: &'static str) -> &'static str {
+    match HelpLang::current() {
+        HelpLang::En => english,
+        HelpLang::Th => SHORTCUTS
+            .iter()
+            .zip(topics::shortcut_labels(HelpLang::Th))
+            .find(|((_, label), _)| *label == english)
+            .map_or(english, |(_, thai)| thai),
+    }
+}
+
 /// The short sheet (`START_SHORTCUTS`), its keys from the real bindings.
 fn render_shortcuts(p: &Palette, fonts: &Fonts) -> impl IntoElement {
     v_flex()
@@ -1302,7 +1339,7 @@ fn render_shortcuts(p: &Palette, fonts: &Fonts) -> impl IntoElement {
                                 .min_w_0()
                                 .text_size(px(12.5))
                                 .text_color(p.muted)
-                                .child(label),
+                                .child(sheet_label(label)),
                         )
                 }),
         )
@@ -1324,7 +1361,7 @@ impl Render for StartView {
         let width = window.viewport_size().width;
         let one = home_columns(width) == 1;
         let welcome = self
-            .welcome
+            .welcome()
             .map(|lang| self.render_welcome(lang, &p, &fonts, cx));
         let left = v_flex()
             .id("start-col-left")
@@ -1339,11 +1376,11 @@ impl Render for StartView {
                 }
             })
             .children(welcome)
-            .child(heading("New compare", &p))
+            .child(heading(tr("New compare"), &p))
             .child(self.render_form(&p, cx))
-            .child(heading("Or pick a type", &p))
+            .child(heading(tr("Or pick a type"), &p))
             .child(self.render_tiles(tile_columns(width), &p, cx));
-        let link = ld_ghost("start-shortcuts-help", "All shortcuts in Help (F1)", &p)
+        let link = ld_ghost("start-shortcuts-help", tr("All shortcuts in Help (F1)"), &p)
             .ld_small()
             .ld_click(
                 true,
@@ -1358,7 +1395,7 @@ impl Render for StartView {
             .child(self.render_recent_heading(&p, cx))
             .child(self.render_recent(&p, cx))
             .children(self.render_recent_more(&p, cx))
-            .child(heading("Keyboard shortcuts", &p))
+            .child(heading(tr("Keyboard shortcuts"), &p))
             .child(render_shortcuts(&p, &fonts))
             .child(h_flex().child(link));
         div()
@@ -1389,6 +1426,11 @@ impl Render for StartView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_table_card_names_workbooks() {
+        assert!(mode_copy(StartMode::Table).2.contains(".xlsx"));
+    }
 
     #[test]
     fn typed_paths_lose_whitespace_and_copy_as_path_quotes() {
@@ -1532,27 +1574,21 @@ mod tests {
     fn the_welcome_card_is_due_until_start_welcome_reaches_its_revision() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        assert_eq!(welcome_due(None), Some(HelpLang::Th), "no data folder");
-        assert_eq!(welcome_due(Some(&path)), Some(HelpLang::Th), "no file");
+        assert!(welcome_due(None), "no data folder");
+        assert!(welcome_due(Some(&path)), "no file");
         let set = |text: &str| std::fs::write(&path, text).unwrap();
         set(r#"{ "start.welcome": 0 }"#);
-        assert_eq!(welcome_due(Some(&path)), Some(HelpLang::Th), "below");
+        assert!(welcome_due(Some(&path)), "below");
         set(r#"{ "start.welcome": 1 }"#);
-        assert_eq!(welcome_due(Some(&path)), None, "seen");
+        assert!(!welcome_due(Some(&path)), "seen");
         set(r#"{ "start.welcome": 2.0 }"#);
-        assert_eq!(welcome_due(Some(&path)), None, "a later revision");
+        assert!(!welcome_due(Some(&path)), "a later revision");
         set(r#"{ "start.welcome": "yes" }"#);
-        assert_eq!(welcome_due(Some(&path)), Some(HelpLang::Th), "not a number");
-        set(r#"{ "help.lang": "en" }"#);
-        assert_eq!(
-            welcome_due(Some(&path)),
-            Some(HelpLang::En),
-            "in the help's language"
-        );
+        assert!(welcome_due(Some(&path)), "not a number");
         set("not json {{");
-        assert_eq!(welcome_due(Some(&path)), Some(HelpLang::Th), "garbage");
+        assert!(welcome_due(Some(&path)), "garbage");
         std::fs::remove_file(&path).unwrap();
         crate::settings::set_u64(&path, WELCOME_KEY, WELCOME_REV).unwrap();
-        assert_eq!(welcome_due(Some(&path)), None, "as a dismissal writes it");
+        assert!(!welcome_due(Some(&path)), "as a dismissal writes it");
     }
 }

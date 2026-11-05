@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use duet_core::folder::entry::{EntryKind, Filters, ScanError, join_rel};
@@ -26,23 +27,26 @@ use crate::folder::batch::{DeleteAsk, DeleteSides, TrashFn};
 use crate::folder::export_panel::{self, ExportConfirm, ExportState, export_actions};
 use crate::folder::job::shallow;
 use crate::folder::menu::{list_menu, menu_actions};
-use crate::folder::model::{FolderFilter, FolderModel, SortKey};
+use crate::folder::model::{FolderFilter, FolderModel, Reveal, SortKey};
 use crate::folder::odd::OddRun;
 use crate::folder::ops::Direction;
-use crate::folder::ops::{empty_state, parse_masks, progress_text};
+use crate::folder::ops::{empty_state, moved_switched_off, parse_masks, progress_text};
 use crate::folder::prefs::{self, FolderPrefs, Layout};
 use crate::folder::select::{DragSelect, drag_listeners};
 use crate::folder::sync_panel::{self, SyncConfirm, SyncState, sync_actions};
+use crate::i18n::errors::folder_error;
+use crate::i18n::{LiveText, live, tr, tr_key, trf};
 use crate::job::JobSlot;
 use crate::palette::Palette;
 use crate::pathbar::ActiveEdit;
 use crate::settings;
 use crate::status::StatusPart;
 use crate::ui::fonts::Fonts;
+use crate::ui::prose::ProseExt as _;
 use duet_core::folder::actions::{move_to_trash, roots_overlap};
 use options::{
     CriterionContent, CriterionQuick, CriterionRules, CriterionSize, ToggleConfirmCopy,
-    ToggleEnterFolders, ToggleOddScan,
+    ToggleEnterFolders, ToggleFindMoves, ToggleOddScan,
 };
 
 mod flat;
@@ -90,6 +94,11 @@ actions!(
 );
 
 pub const CONTEXT: &str = "FolderView";
+/// What the include, exclude and path filter fields say while empty. Stored in the fields, so
+/// `relabel` sets them again.
+const INCLUDE_PLACEHOLDER: &str = tr_key("e.g. *.rs; *.toml");
+const EXCLUDE_PLACEHOLDER: &str = tr_key("e.g. target; *.log");
+const FILTER_PLACEHOLDER: &str = tr_key("Filter paths");
 pub(super) const ROW_HEIGHT: f32 = 24.0;
 const PAGE_ROWS: isize = 20;
 
@@ -152,6 +161,9 @@ pub struct FolderView {
     pub(super) prefs: FolderPrefs,
     pub(super) model: Option<FolderModel>,
     pub(crate) status: SharedString,
+    /// The status when it is one fixed sentence (scanning, cancelled, an error), which `relabel`
+    /// builds again in the new language.
+    status_live: Option<LiveText>,
     /// The same line as coloured parts while a compare result is on show; empty for progress,
     /// cancel and error texts.
     status_parts: Vec<StatusPart>,
@@ -177,6 +189,13 @@ pub struct FolderView {
     task: Option<Task<()>>,
     /// Updates the status line with scan counts while a compare runs.
     progress_task: Option<Task<()>>,
+    /// The counters of the compare that runs; Esc reads them to tell the moved-file pass from
+    /// the rest.
+    compare_progress: Option<Arc<FolderProgress>>,
+    /// Esc stopped the moved-file pass: the result is kept without tags, and says so.
+    moves_stopped: bool,
+    /// A tag jump just ran: the next click on a row may not open a file.
+    jumped: bool,
     include: Entity<InputState>,
     exclude: Entity<InputState>,
     /// The Quick time tolerance, in whole seconds.
@@ -189,7 +208,7 @@ pub struct FolderView {
     /// The export panel and job (see `export_panel.rs`).
     pub(super) export: ExportState,
     /// Why the include/exclude masks were not applied.
-    mask_error: Option<SharedString>,
+    mask_error: Option<LiveText>,
     _subscriptions: Vec<Subscription>,
     pub(super) scroll: UniformListScrollHandle,
     pub(super) focus: FocusHandle,
@@ -224,14 +243,15 @@ impl FolderView {
             let value = masks.join("; ");
             cx.new(|cx| {
                 InputState::new(window, cx)
-                    .placeholder(placeholder)
+                    .placeholder(tr(placeholder))
                     .default_value(value)
             })
         };
         // Short enough for the 220 px fields in the code font; the labels name the fields.
-        let include = masks("e.g. *.rs; *.toml", &options.filters.include);
-        let exclude = masks("e.g. target; *.log", &options.filters.exclude);
-        let name_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter paths"));
+        let include = masks(INCLUDE_PLACEHOLDER, &options.filters.include);
+        let exclude = masks(EXCLUDE_PLACEHOLDER, &options.filters.exclude);
+        let name_filter =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr(FILTER_PLACEHOLDER)));
         let tolerance = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
             state.set_value(options.quick.tolerance.as_secs().to_string(), window, cx);
@@ -277,7 +297,8 @@ impl FolderView {
             options,
             prefs,
             model: None,
-            status: "Scanning…".into(),
+            status: tr("Scanning…").into(),
+            status_live: Some(live("Scanning…")),
             status_parts: Vec::new(),
             compare_started: None,
             took: None,
@@ -288,9 +309,16 @@ impl FolderView {
             batch: None,
             plan_epoch: 0,
             detect: JobSlot::default(),
-            trash: std::sync::Arc::new(move_to_trash),
+            trash: std::sync::Arc::new(|path| {
+                move_to_trash(path).inspect_err(|err| {
+                    tracing::warn!(path = %path.display(), %err, "move to the Recycle Bin failed");
+                })
+            }),
             task: None,
             progress_task: None,
+            compare_progress: None,
+            moves_stopped: false,
+            jumped: false,
             include,
             exclude,
             tolerance,
@@ -329,6 +357,32 @@ impl FolderView {
         &self.status
     }
 
+    /// The language changed. A notice is one-shot feedback in the old language, so it goes and the
+    /// status falls back to what it works out. What is stored is built again: the status, the
+    /// mask error and the three fields' placeholders.
+    pub fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.notice = None;
+        if let Some(line) = &mut self.status_live {
+            line.relabel();
+            self.status = (&*line).into();
+        } else {
+            self.refresh_status();
+        }
+        if let Some(error) = &mut self.mask_error {
+            error.relabel();
+        }
+        for (field, key) in [
+            (&self.include, INCLUDE_PLACEHOLDER),
+            (&self.exclude, EXCLUDE_PLACEHOLDER),
+            (&self.name_filter, FILTER_PLACEHOLDER),
+        ] {
+            field.update(cx, |state, cx| state.set_placeholder(tr(key), window, cx));
+        }
+        self.relabel_sync();
+        self.relabel_export(window, cx);
+        cx.notify();
+    }
+
     pub fn notice(&self) -> Option<&str> {
         self.notice.as_deref()
     }
@@ -336,6 +390,14 @@ impl FolderView {
     /// Shows plain text in the status bar (progress, cancel, errors).
     pub(super) fn set_status(&mut self, text: impl Into<SharedString>) {
         self.status = text.into();
+        self.status_live = None;
+        self.status_parts.clear();
+    }
+
+    /// Like `set_status`, for a sentence `relabel` must be able to say again in the other language.
+    pub(super) fn set_status_live(&mut self, text: LiveText) {
+        self.status = (&text).into();
+        self.status_live = Some(text);
         self.status_parts.clear();
     }
 
@@ -371,7 +433,7 @@ impl FolderView {
             exclude: parse_masks(&self.exclude.read(cx).value()),
         };
         if let Err(err) = validate_filters(&filters) {
-            self.mask_error = Some(err.to_string().into());
+            self.mask_error = Some(LiveText::new(move || folder_error(&err)));
             cx.notify();
             return;
         }
@@ -554,6 +616,18 @@ impl FolderView {
         self.job.generation()
     }
 
+    /// Test hook: a compare that is in its moved-file pass (10 files to read, 2 read). Returns
+    /// the job generation to deliver its result with.
+    #[doc(hidden)]
+    pub fn begin_moves_pass_for_test(&mut self) -> u64 {
+        let (generation, _cancel) = self.job.start();
+        let progress = Arc::new(FolderProgress::default());
+        progress.moves.total.store(10, Ordering::Relaxed);
+        progress.moves.done.store(2, Ordering::Relaxed);
+        self.compare_progress = Some(progress);
+        generation
+    }
+
     /// Test hook: deliver a job result as if job `generation` had produced it.
     #[doc(hidden)]
     pub fn apply_for_test(
@@ -597,10 +671,21 @@ impl FolderView {
             }
             return;
         }
+        // In the moved-file pass everything else is finished: stop only the search and keep
+        // the comparison (the result arrives as usual, without tags).
+        let searching = self.compare_progress.as_ref().is_some_and(|p| {
+            p.moves.done.load(Ordering::Relaxed) < p.moves.total.load(Ordering::Relaxed)
+        });
+        if searching {
+            self.moves_stopped = true;
+            self.job.stop_pass();
+            cx.notify();
+            return;
+        }
         self.job.cancel();
         self.task = None;
         self.progress_task = None;
-        self.set_status("Cancelled. Press F5 to compare again.");
+        self.set_status_live(live("Cancelled. Press F5 to compare again."));
         cx.notify();
     }
 
@@ -627,10 +712,12 @@ impl FolderView {
             // The newest rules of the text tabs, read now so a change applies to this compare.
             options.text_rules = prefs::text_rules(cx);
         }
-        self.set_status("Scanning… · Esc to cancel");
+        self.moves_stopped = false;
+        self.set_status_live(live("Scanning… · Esc to cancel"));
         let background = cx.background_executor().clone();
         let progress = Arc::new(FolderProgress::default());
         let ticker = progress.clone();
+        self.compare_progress = Some(progress.clone());
         self.progress_task = Some(cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -744,7 +831,9 @@ impl FolderView {
             Err(err) => {
                 self.job.finish(generation);
                 self.progress_task = None;
-                self.set_status(format!("Error: {err}"));
+                self.set_status_live(LiveText::new(move || {
+                    trf("Error: {}", &[&folder_error(&err)])
+                }));
                 cx.notify();
                 return false;
             }
@@ -771,6 +860,35 @@ impl FolderView {
         self.prefs.layout = layout;
         self.remember(prefs::VIEW, cx);
         self.with_model(cx, |m| m.set_layout(layout));
+    }
+
+    /// Selects the other file of a moved or renamed pair (the tag's click). A collapsed folder
+    /// above it opens; when the chips hide it the view shows Moved, which is not remembered;
+    /// when the path filter hides it nothing moves and the status line names it.
+    pub fn jump_to_partner(&mut self, node: u32, cx: &mut Context<Self>) {
+        self.jumped = true;
+        let mut reveal = None;
+        let mut other = String::new();
+        self.with_model(cx, |m| {
+            reveal = m.jump_to_partner(node);
+            other = m
+                .moved_partner(node)
+                .map(|twin| m.node(twin).rel.clone())
+                .unwrap_or_default();
+        });
+        match reveal {
+            Some(Reveal::ChipChanged(_)) => {
+                self.close_sync(cx);
+                self.refresh_status();
+                self.notice = Some(tr("Showing Moved so both files are visible.").into());
+            }
+            Some(Reveal::HiddenByPathFilter) => {
+                self.notice =
+                    Some(trf("The other file is hidden by the path filter: {}", &[&other]).into());
+            }
+            Some(Reveal::Shown(_)) | None => {}
+        }
+        cx.notify();
     }
 
     /// A flat-list header click (the same column flips the order); not remembered.
@@ -848,7 +966,7 @@ impl FolderView {
             wrapped = m.next_difference_wrapping().is_some_and(|step| step.1)
         });
         if wrapped {
-            self.notice = Some("Wrapped to the first difference.".into());
+            self.notice = Some(tr("Wrapped to the first difference.").into());
         }
     }
 
@@ -858,7 +976,7 @@ impl FolderView {
             wrapped = m.prev_difference_wrapping().is_some_and(|step| step.1)
         });
         if wrapped {
-            self.notice = Some("Wrapped to the last difference.".into());
+            self.notice = Some(tr("Wrapped to the last difference.").into());
         }
     }
 
@@ -920,11 +1038,14 @@ impl FolderView {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus, cx);
+        // The jump of a tag press shifted the rows under the pointer: the second press of that
+        // double click would open whatever is there now. One click ends the guard.
+        let after_jump = std::mem::take(&mut self.jumped);
         if modifiers.shift {
             if let Some(model) = &mut self.model {
                 model.extend_to(row, modifiers.control);
             }
-        } else if clicks >= 2 && !modifiers.control {
+        } else if clicks >= 2 && !modifiers.control && !after_jump {
             self.open_selected(cx);
         }
         cx.notify();
@@ -1021,7 +1142,25 @@ impl Render for FolderView {
             .map(|m| {
                 let filters = &self.options.filters;
                 let masks = !filters.include.is_empty() || !filters.exclude.is_empty();
-                empty_state(&m.counts(), m.filter(), m.name_filter().is_some(), masks)
+                let (title, hint) = empty_state(
+                    &m.counts(),
+                    m.filter(),
+                    m.name_filter().is_some(),
+                    masks,
+                    self.options.mode,
+                );
+                let switched_off = m.filter() == FolderFilter::Moved
+                    && self.options.mode.reads_contents()
+                    && !self.options.find_moves
+                    && title == tr("No moved files.");
+                (
+                    title,
+                    if switched_off {
+                        Some(moved_switched_off())
+                    } else {
+                        hint
+                    },
+                )
             });
         let sync_panel = self.render_sync_panel(&palette, &fonts, window, cx);
         let export_panel = self.render_export_panel(&palette, &fonts, window, cx);
@@ -1105,6 +1244,9 @@ impl Render for FolderView {
             .on_action(cx.listener(|this, _: &ToggleConfirmCopy, _, cx| {
                 this.set_confirm_copy(!this.prefs.confirm_copy, cx)
             }))
+            .on_action(cx.listener(|this, _: &ToggleFindMoves, _, cx| {
+                this.set_find_moves(!this.prefs.find_moves, cx)
+            }))
             .on_action(cx.listener(|this, _: &ToggleEnterFolders, _, cx| {
                 this.set_enter_folders(!this.prefs.enter_folders, cx)
             }))
@@ -1117,7 +1259,7 @@ impl Render for FolderView {
                     .px_2()
                     .pb_1()
                     .text_color(palette.del)
-                    .child(error)
+                    .prose(SharedString::from(&error))
             }))
             .child(self.render_chips(&palette, cx))
             .child(if self.prefs.layout == Layout::Flat {
@@ -1174,7 +1316,7 @@ impl Render for FolderView {
                                         .test_support()
                                         .aria_label(hint)
                                         .text_color(palette.muted)
-                                        .child(hint)
+                                        .prose(hint)
                                 })),
                         )
                     })

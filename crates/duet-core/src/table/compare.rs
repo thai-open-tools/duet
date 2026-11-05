@@ -487,7 +487,10 @@ pub fn compare(
         |cols: &[usize]| -> Vec<usize> { cols.iter().filter_map(|&c| columns[c].left).collect() };
     let right_of =
         |cols: &[usize]| -> Vec<usize> { cols.iter().filter_map(|&c| columns[c].right).collect() };
-    let rules = &opts.rules;
+    let rules = &CellRules {
+        marked: left.is_some_and(Table::text_marked) && right.is_some_and(Table::text_marked),
+        ..opts.rules
+    };
     let (pairs, duplicates) = if keys.is_empty() {
         let pairs = align_by_order(
             &a,

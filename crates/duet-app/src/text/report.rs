@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use duet_core::cancel::CancelToken;
 use duet_core::text::diff::{DiffInput, DiffOptions, LineDiff, diff_lines};
+use duet_core::text::document::ReadOnlyReason;
 use duet_core::text::encoding::TextEncoding;
 use duet_core::text::lines::EolStyle;
 use duet_core::text::report::{
@@ -19,28 +20,37 @@ use duet_core::text::save::{SaveRequest, save};
 use encoding_rs::UTF_8;
 use gpui_kit::{ClipboardItem, Context, PromptLevel, Window, actions};
 
+use crate::i18n::errors::diff_error;
+use crate::i18n::{Lang, answers, current, scoped, tr, tr_key, trf};
 use crate::paths::home_dir;
-use crate::text::model::{Snapshot, status_text};
+use crate::text::model::{Snapshot, report_status_text};
 use crate::text::view::TextView;
 use crate::ui::menu::MenuEntry;
 
 actions!(
     text_report,
-    [ReportHtml, ReportPatch, ReportText, CopyPatch]
+    [
+        ReportHtml,
+        ReportPatch,
+        ReportText,
+        CopyPatch,
+        ReportLangThai,
+        ReportLangEnglish
+    ]
 );
 
 /// What the HTML report's question offers; the last answer cancels.
 pub const HTML_ANSWERS: [&str; 4] = [
-    "Differences with context",
-    "Differences only",
-    "All lines",
-    "Cancel",
+    tr_key("Differences with context"),
+    tr_key("Differences only"),
+    tr_key("All lines"),
+    tr_key("Cancel"),
 ];
-pub const HTML_QUESTION: &str = "Which lines should the report show?";
+pub const HTML_QUESTION: &str = tr_key("Which lines should the report show?");
 /// LocalDiff's patch context (`ctx: 3`).
 const PATCH_CONTEXT: u32 = 3;
 /// Why the patch or the text report did nothing.
-const TOO_LARGE: &str = "Patch and text reports are not available for files over 64 MiB.";
+const TOO_LARGE: &str = tr_key("Patch and text reports are not available for files over 64 MiB.");
 
 /// Stops the reports still building when its tab closes: the patch's own compare of a large
 /// pair can take a while.
@@ -57,12 +67,18 @@ impl Drop for ReportCancel {
 pub fn report_menu(view: &TextView) -> Vec<MenuEntry> {
     let on = view.can_report();
     vec![
-        MenuEntry::action("HTML report (side by side)…", ReportHtml).enabled(on),
-        MenuEntry::action("Patch file (unified diff)…", ReportPatch).enabled(on),
-        MenuEntry::action("Text report…", ReportText).enabled(on),
+        MenuEntry::action(tr("HTML report (side by side)…"), ReportHtml).enabled(on),
+        MenuEntry::action(tr("Patch file (unified diff)…"), ReportPatch).enabled(on),
+        MenuEntry::action(tr("Text report…"), ReportText).enabled(on),
         MenuEntry::Separator,
-        MenuEntry::action("Copy patch to the clipboard", CopyPatch).enabled(on),
+        MenuEntry::action(tr("Copy patch to the clipboard"), CopyPatch).enabled(on),
     ]
+}
+
+/// The language items that end the Report ▾ menu: Thai and English, the report's language
+/// checked. They are apart from `report_menu`, whose items wait for a result.
+pub fn report_language_menu(view: &TextView) -> Vec<MenuEntry> {
+    crate::ui::menu::language_items(view.report_lang(), ReportLangThai, ReportLangEnglish)
 }
 
 #[derive(Clone, Copy)]
@@ -90,6 +106,8 @@ struct Input {
     ignoring: bool,
     tab_width: usize,
     status: String,
+    /// The language the report is written in.
+    lang: Lang,
     /// Shown in the report: the file name, "untitled" for a side with no file.
     names: [String; 2],
     /// The side's file name, empty when it has no file; the saved name is built from it.
@@ -128,7 +146,7 @@ fn patch_of(
         },
         cancel,
     )
-    .map_err(|err| err.to_string())?;
+    .map_err(|err| diff_error(&err))?;
     Ok(unified_diff(
         left,
         right,
@@ -143,8 +161,13 @@ fn patch_of(
 
 /// Builds the report's text. Runs off the UI thread: finishing the snapshot indexes lines.
 fn build(kind: Kind, input: Input) -> Result<String, String> {
+    // The patch is a format that tools read: it stays English in both languages.
+    let _lang = scoped(match kind {
+        Kind::Patch => Lang::En,
+        Kind::Html(_) | Kind::Text => input.lang,
+    });
     let (left, right, _) = input.snapshot.finish();
-    let title = format!("{} vs {}", input.names[0], input.names[1]);
+    let title = trf("{} vs {}", &[&input.names[0], &input.names[1]]);
     let meta = ReportMeta {
         left: &input.names[0],
         right: &input.names[1],
@@ -181,6 +204,17 @@ fn build(kind: Kind, input: Input) -> Result<String, String> {
 }
 
 impl TextView {
+    /// The language the next report is written in: the one picked in the Report menu, else the
+    /// UI's. Not saved.
+    pub fn report_lang(&self) -> Lang {
+        self.report_lang.unwrap_or_else(current)
+    }
+
+    pub fn set_report_lang(&mut self, lang: Lang, cx: &mut Context<Self>) {
+        self.report_lang = Some(lang);
+        cx.notify();
+    }
+
     /// A result is shown and nothing is running.
     pub fn can_report(&self) -> bool {
         self.model.is_some() && !self.is_busy()
@@ -188,6 +222,9 @@ impl TextView {
 
     fn report_input(&self) -> Option<Input> {
         let model = self.model.as_ref().filter(|_| !self.is_busy())?;
+        let lang = self.report_lang();
+        // What the report says of itself is built in its language.
+        let _lang = scoped(lang);
         let (diff, rows) = model.report_parts();
         let path = |left: bool| {
             if left {
@@ -197,7 +234,7 @@ impl TextView {
             }
         };
         let name = |left: bool| match file_name(path(left)) {
-            name if name.is_empty() => "untitled".to_owned(),
+            name if name.is_empty() => tr("untitled").to_owned(),
             name => name,
         };
         Some(Input {
@@ -206,7 +243,8 @@ impl TextView {
             rows,
             ignoring: self.request.ignoring(),
             tab_width: usize::from(self.prefs.tab_width),
-            status: status_text(model),
+            status: report_status_text(model),
+            lang,
             names: [name(true), name(false)],
             files: [file_name(path(true)), file_name(path(false))],
             dir: path(true)
@@ -224,7 +262,25 @@ impl TextView {
         if !self.mapped.contains(&true) {
             return false;
         }
-        self.show_notice(TOO_LARGE, cx);
+        self.show_notice(tr(TOO_LARGE), cx);
+        true
+    }
+
+    /// The patch of a sorted or formatted view would name the real files and hold lines they do
+    /// not have: say so instead. The HTML and text reports carry the view's notes, so they stay.
+    fn refused_as_a_view(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(model) = self.model.as_ref() else {
+            return false;
+        };
+        let reasons = [true, false].map(|left| model.derived_view(left));
+        let message = if reasons.contains(&Some(ReadOnlyReason::Sorted)) {
+            tr("A patch can't describe the sorted view. Turn Sort keys off first.")
+        } else if reasons.contains(&Some(ReadOnlyReason::Formatted)) {
+            tr("A patch can't describe the formatted view. Turn Format off first.")
+        } else {
+            return false;
+        };
+        self.show_notice(message, cx);
         true
     }
 
@@ -235,12 +291,12 @@ impl TextView {
         };
         self.pull_shared(cx);
         let context = self.prefs.context_lines;
-        let detail = format!("Around each difference: {context} lines of context.");
+        let detail = trf("Around each difference: {} lines of context.", &[&context]);
         let answer = window.prompt(
             PromptLevel::Info,
-            HTML_QUESTION,
+            tr(HTML_QUESTION),
             Some(&detail),
-            &HTML_ANSWERS,
+            &answers(&HTML_ANSWERS),
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -258,7 +314,7 @@ impl TextView {
     }
 
     pub fn report_patch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.refused_as_too_large(cx) {
+        if self.refused_as_too_large(cx) || self.refused_as_a_view(cx) {
             return;
         }
         if let Some(input) = self.report_input() {
@@ -309,8 +365,8 @@ impl TextView {
             let _ = this.update(cx, |view, cx| {
                 view.show_notice(
                     match result {
-                        Ok(()) => format!("Exported: {}.", path.display()),
-                        Err(err) => format!("Can't export: {err}."),
+                        Ok(()) => trf("Exported: {}.", &[&path.display()]),
+                        Err(err) => trf("Can't export: {}.", &[&err]),
                     },
                     cx,
                 );
@@ -321,7 +377,7 @@ impl TextView {
 
     /// Puts the patch on the clipboard.
     pub fn copy_patch(&mut self, cx: &mut Context<Self>) {
-        if self.refused_as_too_large(cx) {
+        if self.refused_as_too_large(cx) || self.refused_as_a_view(cx) {
             return;
         }
         let Some(input) = self.report_input() else {
@@ -335,9 +391,9 @@ impl TextView {
             let _ = this.update(cx, |view, cx| match result {
                 Ok(patch) => {
                     cx.write_to_clipboard(ClipboardItem::new_string(patch));
-                    view.show_notice("Patch copied to the clipboard.", cx);
+                    view.show_notice(tr("Patch copied to the clipboard."), cx);
                 }
-                Err(err) => view.show_notice(format!("Can't copy the patch: {err}."), cx),
+                Err(err) => view.show_notice(trf("Can't copy the patch: {}.", &[&err]), cx),
             });
         })
         .detach();

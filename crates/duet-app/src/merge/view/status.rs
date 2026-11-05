@@ -7,7 +7,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::{AnyElement, FontWeight, relative, uniform_list};
 
 use super::cards::{ROW_HEIGHT, number_cell};
-use super::input::eol_label;
+use super::input::{eol_label, shown_name};
 use super::*;
 use crate::format::encoding_label;
 use crate::status::{StatusPart, Tone};
@@ -15,7 +15,8 @@ use crate::text::display::{DisplayOptions, display_line};
 use crate::ui::fonts::{CODE_SIZE, Fonts, SMALL_SIZE};
 use crate::ui::icons;
 use crate::ui::style::{
-    LdExt as _, ld_button, ld_icon_button, ld_tip, status_bar, status_line_box, status_parts_row,
+    LdExt as _, ld_button, ld_icon_button, ld_tip, status_bar, status_line_box, status_notice,
+    status_parts_row,
 };
 
 /// The preview is rebuilt this long after the last change (`debounce(.., 120)`).
@@ -38,8 +39,8 @@ struct InfoPiece {
 }
 
 /// The status bar's "Line endings differ" part, which has a tooltip.
-const EOL_DIFFERS: &str = "Line endings differ";
-const EOL_TIP: &str = "The result uses the left file's line endings";
+const EOL_DIFFERS: &str = tr_key("Line endings differ");
+const EOL_TIP: &str = tr_key("The result uses the left file's line endings");
 
 impl MergeView {
     pub fn show_result(&self) -> bool {
@@ -95,7 +96,8 @@ impl MergeView {
         let mut text = count_of(preview.lines.len() as u64, "line", "lines");
         if preview.unresolved > 0 {
             let open = count_of(preview.unresolved as u64, "conflict", "conflicts");
-            text.push_str(&format!(" · {open} as markers"));
+            text.push_str(" · ");
+            text.push_str(&trf("{} as markers", &[&open]));
         }
         Some(text)
     }
@@ -106,28 +108,28 @@ impl MergeView {
         };
         let side = |label, text: &MergeText| InfoPiece {
             label,
-            name: text.name.clone(),
+            name: shown_name(&text.name),
             meta: format!("{} · {}", encoding_label(&text.encoding), eol_label(text)),
             code: true,
         };
         let result = match self.output.as_deref() {
             Some(path) => InfoPiece {
-                label: "→ Result:",
+                label: tr("→ Result:"),
                 name: path.display().to_string(),
                 meta: String::new(),
                 code: true,
             },
             None => InfoPiece {
-                label: "→ Result:",
-                name: "chosen when saving".to_owned(),
+                label: tr("→ Result:"),
+                name: tr("chosen when saving").to_owned(),
                 meta: String::new(),
                 code: false,
             },
         };
         vec![
-            side("Left:", session.left()),
-            side("Base:", session.base()),
-            side("Right:", session.right()),
+            side(tr("Left:"), session.left()),
+            side(tr("Base:"), session.base()),
+            side(tr("Right:"), session.right()),
             result,
         ]
     }
@@ -163,9 +165,9 @@ impl MergeView {
                 Tone::RightOnly,
             ),
             StatusPart::new(
-                format!(
-                    "Conflicts left: {unresolved} / {}",
-                    session.conflicts().len()
+                trf(
+                    "Conflicts left: {} / {}",
+                    &[&unresolved, &session.conflicts().len()],
                 ),
                 if unresolved > 0 {
                     Tone::LeftOnly
@@ -177,15 +179,21 @@ impl MergeView {
         // The result's format comes from the left, else the base or the right (M-62).
         let format = session.output_format();
         let encoding = if self.utf8_agreed {
-            format!("UTF-8 (instead of {})", encoding_label(&format.encoding))
+            trf(
+                "UTF-8 (instead of {})",
+                &[&encoding_label(&format.encoding)],
+            )
         } else {
             encoding_label(&format.encoding)
         };
         parts.push(StatusPart::new(
-            format!(
-                "Result: {} · {encoding} · {}",
-                count_of(session.result_line_count() as u64, "line", "lines"),
-                format.eol.label()
+            trf(
+                "Result: {} · {} · {}",
+                &[
+                    &count_of(session.result_line_count() as u64, "line", "lines"),
+                    &encoding,
+                    &format.eol.label(),
+                ],
             ),
             Tone::Text,
         ));
@@ -199,22 +207,25 @@ impl MergeView {
         parts.push(StatusPart::new(
             format!(
                 "{} | {} | {}",
-                named("Left", left),
-                named("Base", base),
-                named("Right", right)
+                named(tr("Left"), left),
+                named(tr("Base"), base),
+                named(tr("Right"), right)
             ),
             Tone::Muted,
         ));
         if left.format.eol != base.format.eol || left.format.eol != right.format.eol {
-            parts.push(StatusPart::new(EOL_DIFFERS, Tone::Changed));
+            parts.push(StatusPart::new(tr(EOL_DIFFERS), Tone::Changed));
         }
         if session.trail() {
-            parts.push(StatusPart::new("Ignoring trailing whitespace", Tone::Moved));
+            parts.push(StatusPart::new(
+                tr("Ignoring trailing whitespace"),
+                Tone::Moved,
+            ));
         }
         if session.is_dirty() {
-            parts.push(StatusPart::new("● Not saved", Tone::Changed));
+            parts.push(StatusPart::new(tr("● Not saved"), Tone::Changed));
         } else if unresolved == 0 {
-            parts.push(StatusPart::new("✓ Ready to save", Tone::RightOnly));
+            parts.push(StatusPart::new(tr("✓ Ready to save"), Tone::RightOnly));
         }
         parts
     }
@@ -268,9 +279,9 @@ impl MergeView {
             .children(pieces)
             .child(div().flex_1())
             .child(
-                ld_button("merge-save-as", "Save result to…", p)
+                ld_button("merge-save-as", tr("Save result to…"), p)
                     .ld_small()
-                    .ld_tooltip("Choose where to save the result")
+                    .ld_tooltip(tr("Choose where to save the result"))
                     .ld_click(
                         self.session.is_some(),
                         cx.listener(|this, _, window, cx| this.save(true, window, cx).detach()),
@@ -283,10 +294,12 @@ impl MergeView {
     pub(super) fn render_merge_status(&self, p: &Palette) -> impl IntoElement {
         let parts = self.merge_status_parts();
         let line = if parts.is_empty() {
-            status_line_box("")
-        } else if parts.iter().any(|part| part.text == EOL_DIFFERS) {
+            status_line_box("merge-status-text", "", "")
+        } else if parts.iter().any(|part| part.text == tr(EOL_DIFFERS)) {
             // The one part with a tooltip: each part is its own piece.
             let mut row = h_flex()
+                .id("merge-status-text")
+                .test_support()
                 .flex_1()
                 .min_w_0()
                 .overflow_hidden()
@@ -298,28 +311,24 @@ impl MergeView {
                 let piece = div()
                     .text_color(part.tone.color(p))
                     .child(part.text.clone());
-                row = row.child(if part.text == EOL_DIFFERS {
+                row = row.child(if part.text == tr(EOL_DIFFERS) {
                     piece
                         .id("merge-status-eol")
                         .test_support()
-                        .tooltip(|window, cx| ld_tip(EOL_TIP.into(), window, cx))
+                        .tooltip(|window, cx| ld_tip(tr(EOL_TIP).into(), window, cx))
                         .into_any_element()
                 } else {
                     piece.into_any_element()
                 });
             }
-            row
+            row.into_any_element()
         } else {
-            status_parts_row(&parts, p)
+            status_parts_row("merge-status-text", &parts, p)
         };
-        let notice = self.notice.clone().map(|notice| {
-            div()
-                .id("merge-notice")
-                .test_support()
-                .flex_none()
-                .text_color(p.text)
-                .child(notice)
-        });
+        let notice = self
+            .notice
+            .clone()
+            .map(|notice| status_notice("merge-notice", notice, p));
         status_bar("merge-status", p).child(line).children(notice)
     }
 
@@ -351,7 +360,11 @@ impl MergeView {
                         .py(px(5.))
                         .border_b_1()
                         .border_color(p.line)
-                        .child(div().font_weight(FontWeight::BOLD).child("Whole result"))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::BOLD)
+                                .child(tr("Whole result")),
+                        )
                         .child(
                             div()
                                 .id("merge-preview-count")
@@ -365,7 +378,7 @@ impl MergeView {
                             ld_icon_button(
                                 "merge-preview-close",
                                 icons::CLOSE,
-                                "Close the whole result",
+                                tr("Close the whole result"),
                                 p,
                             )
                             .ld_click(

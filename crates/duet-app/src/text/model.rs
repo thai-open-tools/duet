@@ -18,7 +18,9 @@ use duet_core::text::moves::Moves;
 use duet_core::text::rows::{Row, RowKind, RowMap};
 
 use crate::format::{count_of, format_size};
+use crate::i18n::{LiveText, tr, trf};
 use crate::status::{StatusPart, Tone, join_parts};
+use crate::text::job::SideFlip;
 
 mod edits;
 mod visible;
@@ -47,12 +49,13 @@ pub enum TextFilter {
 impl TextFilter {
     pub fn label(self) -> String {
         match self {
-            TextFilter::All => "All".into(),
-            TextFilter::Differences => "Differences".into(),
-            TextFilter::Context(n) => {
-                format!("Differences + {}", count_of(u64::from(n), "line", "lines"))
-            }
-            TextFilter::Same => "Same".into(),
+            TextFilter::All => tr("All").into(),
+            TextFilter::Differences => tr("Differences").into(),
+            TextFilter::Context(n) => trf(
+                "Differences + {}",
+                &[&count_of(u64::from(n), "line", "lines")],
+            ),
+            TextFilter::Same => tr("Same").into(),
         }
     }
 }
@@ -138,7 +141,9 @@ pub struct TextModel {
     expanded: Vec<Range<u32>>,
     moves: Moves,
     /// Notes for the status line, e.g. "Left: formatted JSON".
-    notes: Vec<String>,
+    notes: Vec<LiveText>,
+    /// Turned over when the sides swap, so a note keeps speaking of the side it was about.
+    note_flip: SideFlip,
     /// Editable text per side, indexed by `usize::from(!left)`; made on the first edit.
     buffers: [Option<TextBuffer>; 2],
     /// The buffer version that matches what is on disk, per side.
@@ -180,6 +185,7 @@ impl TextModel {
             expanded: Vec::new(),
             moves: Moves::default(),
             notes: Vec::new(),
+            note_flip: SideFlip::default(),
             buffers: [None, None],
             clean: [0, 0],
             doc_version: [None, None],
@@ -194,13 +200,30 @@ impl TextModel {
         self.revision
     }
 
-    pub fn with_notes(mut self, notes: Vec<String>) -> Self {
+    pub fn with_notes(mut self, notes: Vec<LiveText>) -> Self {
         self.notes = notes;
         self
     }
 
-    pub fn notes(&self) -> &[String] {
+    /// The flip the notes were made with (see `swap_sides`).
+    pub fn with_note_flip(mut self, flip: SideFlip) -> Self {
+        self.note_flip = flip;
+        self
+    }
+
+    pub fn notes(&self) -> Vec<String> {
+        self.notes.iter().map(ToString::to_string).collect()
+    }
+
+    pub(crate) fn live_notes(&self) -> &[LiveText] {
         &self.notes
+    }
+
+    /// The language changed: each note is said again.
+    pub(crate) fn relabel_notes(&mut self) {
+        for note in &mut self.notes {
+            note.relabel();
+        }
     }
 
     /// Exchanges the sides in place (F9). A hunk of `r` removed and `a` added lines takes
@@ -218,6 +241,8 @@ impl TextModel {
         self.blocks = self.rows.change_blocks();
         self.moves = self.moves.swapped();
         self.inline.clear();
+        self.note_flip.toggle();
+        self.relabel_notes();
         self.set_filter(self.filter);
     }
 
@@ -252,24 +277,52 @@ impl TextModel {
         let doc = self.side(left);
         match doc.read_only_reason() {
             Some(ReadOnlyReason::TooLarge) => {
-                Err("This file is over 64 MiB, so it is read-only.".into())
+                Err(tr("This file is over 64 MiB, so it is read-only.").into())
             }
             Some(ReadOnlyReason::LossyDecode) => {
-                Err("This file has bytes the encoding cannot read, so it is read-only.".into())
+                Err(tr("This file has bytes the encoding cannot read, so it is read-only.").into())
             }
             Some(ReadOnlyReason::Formatted) => {
-                Err("The formatted view is read-only. Turn Format off to edit.".into())
+                Err(tr("The formatted view is read-only. Turn Format off to edit.").into())
+            }
+            Some(ReadOnlyReason::Sorted) => {
+                Err(tr("The sorted view is read-only. Turn Sort keys off to edit.").into())
             }
             Some(ReadOnlyReason::Attribute) => {
-                Err("This file is read-only (Windows attribute).".into())
+                Err(tr("This file is read-only (Windows attribute).").into())
             }
-            None if doc.text().is_none() => Err("This file is read-only.".into()),
+            None if doc.text().is_none() => Err(tr("This file is read-only.").into()),
             None => Ok(()),
         }
     }
 
     pub fn buffer(&self, left: bool) -> Option<&TextBuffer> {
         self.buffers[usize::from(!left)].as_ref()
+    }
+
+    /// The reason a side only shows a derived text (Sort keys, Format), not the file's: Save As
+    /// would write that text over the file, a copy would bring it into the other file, and a
+    /// patch would describe it under the file's name. None for a side that shows its own text.
+    pub fn derived_view(&self, left: bool) -> Option<ReadOnlyReason> {
+        if self.buffer(left).is_some() {
+            return None;
+        }
+        self.side(left)
+            .read_only_reason()
+            .filter(|reason| matches!(reason, ReadOnlyReason::Sorted | ReadOnlyReason::Formatted))
+    }
+
+    /// Whether either side shows the sorted text.
+    pub fn shows_sorted(&self) -> bool {
+        [true, false]
+            .into_iter()
+            .any(|left| self.side(left).read_only_reason() == Some(ReadOnlyReason::Sorted))
+    }
+
+    /// Whether a copy can go onto side `to_left`: that side takes edits and the other one shows
+    /// its own text. The arrows are drawn by this.
+    pub fn can_copy_to(&self, to_left: bool) -> bool {
+        self.editable(to_left).is_ok() && self.derived_view(!to_left).is_none()
     }
 
     /// The side's document while it holds the side's text: there is no buffer, or the buffer
@@ -571,7 +624,7 @@ impl TextModel {
     ) -> Result<(Range<usize>, String), String> {
         let rows = self
             .block_rows(block)
-            .ok_or_else(|| String::from("No such difference."))?;
+            .ok_or_else(|| String::from(tr("No such difference.")))?;
         self.copy_rows_edit(rows, to_left)
     }
 
@@ -622,7 +675,9 @@ impl TextModel {
     /// side: the byte offset, the text (the side's own line break), and where the new empty
     /// line starts once it is in. The side must be editable already (`begin_edit`).
     pub fn insert_line_edit(&self, row: u32, left: bool) -> Result<(usize, String, usize), String> {
-        let buffer = self.buffer(left).ok_or("That side has no edits begun.")?;
+        let buffer = self
+            .buffer(left)
+            .ok_or(tr("That side has no edits begun."))?;
         let line = self.rows.line_range(row..row + 1, left).start as usize;
         let at = self.line_offset(left, line);
         let terminator = buffer.terminator(line.min(buffer.line_count().saturating_sub(1)));
@@ -680,12 +735,25 @@ impl TextModel {
     /// The text a copy takes from one side, or why that side can't be copied from: a file over
     /// 64 MiB has no text, and one that did not decode cleanly would bring U+FFFD along.
     fn copy_source(&self, left: bool) -> Result<&str, String> {
+        match self.derived_view(left) {
+            Some(ReadOnlyReason::Sorted) => {
+                return Err(
+                    tr("The sorted view can't be copied from. Turn Sort keys off first.").into(),
+                );
+            }
+            Some(_) => {
+                return Err(
+                    tr("The formatted view can't be copied from. Turn Format off first.").into(),
+                );
+            }
+            None => {}
+        }
         if self.side(left).is_lossy() {
-            return Err("This file did not decode cleanly, so it can't be copied from.".into());
+            return Err(tr("This file did not decode cleanly, so it can't be copied from.").into());
         }
         self.side_text(left)
             .map(|(text, _)| text)
-            .ok_or_else(|| "This file is over 64 MiB, so it can't be copied from.".into())
+            .ok_or_else(|| tr("This file is over 64 MiB, so it can't be copied from.").into())
     }
 
     /// The edit that replaces the whole target side with the other side's text.
@@ -1054,11 +1122,11 @@ pub fn doc_info(doc: &TextDocument) -> String {
     let mut parts = vec![encoding.encoding.name().to_owned()];
     parts.push(
         match doc.eol() {
-            EolStyle::None => "no line breaks",
+            EolStyle::None => tr("no line breaks"),
             EolStyle::Lf => "LF",
             EolStyle::CrLf => "CRLF",
             EolStyle::Cr => "CR",
-            EolStyle::Mixed => "mixed line endings",
+            EolStyle::Mixed => tr("mixed line endings"),
         }
         .to_owned(),
     );
@@ -1066,10 +1134,11 @@ pub fn doc_info(doc: &TextDocument) -> String {
         parts.push("BOM".into());
     }
     match doc.read_only_reason() {
-        Some(ReadOnlyReason::TooLarge) => parts.push("read-only (over 64 MiB)".into()),
-        Some(ReadOnlyReason::LossyDecode) => parts.push("read-only (undecodable bytes)".into()),
-        Some(ReadOnlyReason::Formatted) => parts.push("formatted, read-only".into()),
-        Some(ReadOnlyReason::Attribute) => parts.push("read-only (Windows attribute)".into()),
+        Some(ReadOnlyReason::TooLarge) => parts.push(tr("read-only (over 64 MiB)").into()),
+        Some(ReadOnlyReason::LossyDecode) => parts.push(tr("read-only (undecodable bytes)").into()),
+        Some(ReadOnlyReason::Formatted) => parts.push(tr("formatted, read-only").into()),
+        Some(ReadOnlyReason::Sorted) => parts.push(tr("sorted, read-only").into()),
+        Some(ReadOnlyReason::Attribute) => parts.push(tr("read-only (Windows attribute)").into()),
         None => {}
     }
     parts.join(" · ")
@@ -1077,41 +1146,59 @@ pub fn doc_info(doc: &TextDocument) -> String {
 
 /// The status line as coloured parts: the counts, the filter, moves and notes.
 pub fn status_parts(model: &TextModel) -> Vec<StatusPart> {
+    parts_of(model, false)
+}
+
+/// The status line as a report says it: every part, notes included, in the language now in
+/// force. The notes a model keeps are in the window's language.
+pub fn report_status_text(model: &TextModel) -> String {
+    join_parts(&parts_of(model, true))
+}
+
+fn parts_of(model: &TextModel, fresh: bool) -> Vec<StatusPart> {
     let stats = model.stats();
     let muted = |text: String| StatusPart::new(text, Tone::Muted);
     let mut parts = Vec::new();
     let unimportant = stats.unimportant;
     if stats.hunks == 0 {
         if unimportant > 0 {
-            parts.push(muted("Same under the rules".into()));
+            parts.push(muted(tr("Same under the rules").into()));
             parts.push(StatusPart::new(
                 count_of(unimportant.into(), "unimportant line", "unimportant lines"),
                 Tone::Unimportant,
             ));
+        } else if model.shows_sorted() {
+            // Equal after sorting, not necessarily as written.
+            parts.push(muted(tr("Same when sorted").into()));
         } else {
-            parts.push(muted("Identical".into()));
+            parts.push(muted(tr("Identical").into()));
         }
         let lines = model.line_count(true) as u64;
         parts.push(muted(count_of(lines, "line", "lines")));
     } else {
         parts.extend([
             muted(count_of(stats.hunks as u64, "difference", "differences")),
-            StatusPart::new(format!("{} changed", stats.changed), Tone::Changed),
-            StatusPart::new(format!("{} left only", stats.left_only), Tone::LeftOnly),
-            StatusPart::new(format!("{} right only", stats.right_only), Tone::RightOnly),
+            StatusPart::new(trf("{} changed", &[&stats.changed]), Tone::Changed),
+            StatusPart::new(trf("{} left only", &[&stats.left_only]), Tone::LeftOnly),
+            StatusPart::new(trf("{} right only", &[&stats.right_only]), Tone::RightOnly),
         ]);
         if unimportant > 0 {
             parts.push(StatusPart::new(
-                format!("{} unimportant", format_size(unimportant.into())),
+                trf("{} unimportant", &[&format_size(unimportant.into())]),
                 Tone::Unimportant,
             ));
         }
-        parts.push(muted(format!("{:.1}% same", stats.similarity * 100.0)));
+        parts.push(muted(trf(
+            "{}% same",
+            &[&format!("{:.1}", stats.similarity * 100.0)],
+        )));
     }
-    parts.push(muted(format!("showing {}", model.filter().label())));
+    parts.push(muted(trf("showing {}", &[&model.filter().label()])));
     if stats.hunks > 0 {
         match (model.moves().len(), model.moves().skipped) {
-            (_, true) => parts.push(muted("moved lines not checked (too many changes)".into())),
+            (_, true) => parts.push(muted(
+                tr("moved lines not checked (too many changes)").into(),
+            )),
             (0, false) => {}
             (n, false) => parts.push(StatusPart::new(
                 count_of(n as u64, "moved line", "moved lines"),
@@ -1119,7 +1206,12 @@ pub fn status_parts(model: &TextModel) -> Vec<StatusPart> {
             )),
         }
     }
-    parts.extend(model.notes().iter().map(|note| muted(note.clone())));
+    parts.extend(
+        model
+            .notes
+            .iter()
+            .map(|note| muted(if fresh { note.said() } else { note.to_string() })),
+    );
     parts
 }
 

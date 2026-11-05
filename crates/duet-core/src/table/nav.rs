@@ -38,11 +38,11 @@ impl Filter {
 
     pub fn label(self) -> &'static str {
         match self {
-            Filter::All => "All",
-            Filter::Differences => "Differences",
-            Filter::Same => "Same",
-            Filter::LeftOnly => "Left only",
-            Filter::RightOnly => "Right only",
+            Filter::All => crate::i18n::tr_key("All"),
+            Filter::Differences => crate::i18n::tr_key("Differences"),
+            Filter::Same => crate::i18n::tr_key("Same"),
+            Filter::LeftOnly => crate::i18n::tr_key("Left only"),
+            Filter::RightOnly => crate::i18n::tr_key("Right only"),
         }
     }
 

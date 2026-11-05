@@ -15,8 +15,9 @@ use crate::app::{APP_NAME, recent_file, startup_elapsed};
 use crate::folder::model::FolderFilter;
 use crate::folder::prefs::FolderPrefs;
 use crate::folder::view::{FolderEvent, FolderView};
-use crate::help::HelpView;
+use crate::help::{HelpEvent, HelpView};
 use crate::hex::view::{HexEvent, HexView};
+use crate::i18n::{self, Lang, tr, tr_key};
 use crate::launch::Launch;
 use crate::merge::view::MergeView;
 use crate::palette::Palette;
@@ -24,12 +25,15 @@ use crate::picture::view::{PictureEvent, PictureView};
 use crate::recent::{self, Recent, RecentKind};
 use crate::start::{StartEvent, StartView};
 use crate::table::view::{TableEvent, TableView};
-use crate::tabs::{TabKey, TabSet, badge_text};
+use crate::tabs::{Mode, TabKey, TabSet, badge_text, is_ok_badge};
 use crate::text::view::{TextEvent, TextView};
 use crate::ui::brand::{brand_image, brand_size};
 use crate::ui::fonts::{Fonts, UI_SIZE};
 use crate::ui::icons;
-use crate::ui::style::{LdExt, TAB_RADIUS, ld_dot, ld_icon_button, ld_pill, ld_small_icon_button};
+use crate::ui::style::{
+    LdExt, TAB_RADIUS, ld_dot, ld_icon_button, ld_pill, ld_segment, ld_segmented,
+    ld_small_icon_button,
+};
 
 mod merge;
 
@@ -40,11 +44,26 @@ actions!(workspace, [CloseTab, NextTab, NewTab, OpenHelp]);
 pub const CONTEXT: &str = "Workspace";
 
 /// Why F9 did nothing in a tab with unsaved edits: the swapped pair has a tab of its own.
-const OPEN_ELSEWHERE: &str = "That pair is already open in another tab.";
+const OPEN_ELSEWHERE: &str = tr_key("That pair is already open in another tab.");
+
+/// What a text tab says of a pair of binary files; the badge reads it (D4).
+const BINARY_IDENTICAL: &str = tr_key("Binary files are identical.");
+const BINARY_DIFFERS: &str = tr_key("Binary files differ.");
+
+/// Whether a tab's `message` is `key`, in the language in force. The English key counts too, for a
+/// message built before the text view says it in both languages.
+fn is_message(message: &str, key: &'static str) -> bool {
+    message == key || message == tr(key)
+}
 
 /// The header's "Works offline" pill needs room; it hides below 1100 px.
 pub fn header_pill_visible(width: Pixels) -> bool {
     width >= px(1100.)
+}
+
+/// The header's mode bar needs room for itself and the buttons; it hides below 800 px.
+pub fn header_modes_visible(width: Pixels) -> bool {
+    width >= px(800.)
 }
 
 pub fn key_bindings() -> Vec<KeyBinding> {
@@ -67,6 +86,22 @@ pub enum TabItem {
     Picture(Entity<PictureView>),
     Merge(Entity<MergeView>),
     Help(Entity<HelpView>),
+}
+
+impl TabItem {
+    /// The language changed: the tab's view builds again the text it stores.
+    pub fn relabel(&self, window: &mut Window, cx: &mut App) {
+        match self {
+            TabItem::Start(view) => view.update(cx, |v, cx| v.relabel(window, cx)),
+            TabItem::Folder(view) => view.update(cx, |v, cx| v.relabel(window, cx)),
+            TabItem::Text(view) => view.update(cx, |v, cx| v.relabel(window, cx)),
+            TabItem::Hex(view) => view.update(cx, |v, cx| v.relabel(window, cx)),
+            TabItem::Table(view) => view.update(cx, |v, cx| v.relabel(window, cx)),
+            TabItem::Picture(view) => view.update(cx, |v, cx| v.relabel(window, cx)),
+            TabItem::Merge(view) => view.update(cx, |v, cx| v.relabel(window, cx)),
+            TabItem::Help(view) => view.update(cx, |v, cx| v.relabel(window, cx)),
+        }
+    }
 }
 
 pub struct Workspace {
@@ -136,6 +171,13 @@ impl Workspace {
         &self.tabs
     }
 
+    /// The window title the last frame gave the platform window, which a test platform does not
+    /// keep.
+    #[doc(hidden)]
+    pub fn window_title_for_test(&self) -> &str {
+        &self.title
+    }
+
     /// Test hook for switching tabs without hit-testing the strip.
     pub fn tabs_mut_for_test(&mut self) -> &mut TabSet<TabItem> {
         &mut self.tabs
@@ -145,6 +187,16 @@ impl Workspace {
         match launch {
             Launch::Start => self.open_start(None, window, cx),
             Launch::Invalid(message) => self.open_start(Some(message), window, cx),
+            Launch::StartWithLeft { left, notice } => {
+                self.open_start(notice, window, cx);
+                // Filled now, in the same build as the first frame: a later notify would not
+                // draw one.
+                if let Some(TabItem::Start(view)) = self.tabs.active() {
+                    let view = view.clone();
+                    let left = left.to_string_lossy().into_owned();
+                    view.update(cx, |v, cx| v.set_paths(&left, "", window, cx));
+                }
+            }
             Launch::Folders { left, right } => self.open_folders(left, right, window, cx),
             Launch::Files { left, right } => self.open_files(left, right, None, window, cx),
             Launch::Hex { left, right } => self.open_hex(left, right, None, window, cx),
@@ -152,6 +204,40 @@ impl Workspace {
             Launch::Picture { left, right } => self.open_picture(left, right, None, window, cx),
             Launch::Merge(paths) => self.open_merge(paths, window, cx),
         }
+    }
+
+    /// The header's mode bar: back to the tab of `mode` used last. With none open, a new compare
+    /// of that kind, begun as its Start tile begins one.
+    pub fn go_to_mode(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.tabs.latest(mode) {
+            self.tabs.activate(index);
+            self.focus_active(window, cx);
+            cx.notify();
+            return;
+        }
+        if mode == Mode::Merge {
+            let empty = crate::launch::MergePaths::default();
+            self.open_launch(Launch::Merge(empty), window, cx);
+            return;
+        }
+        match self.tabs.latest(Mode::Start) {
+            Some(index) => {
+                self.tabs.activate(index);
+                self.focus_active(window, cx);
+            }
+            None => self.open_start(None, window, cx),
+        }
+        if let Some(TabItem::Start(view)) = self.tabs.active() {
+            view.clone().update(cx, |view, cx| match mode {
+                Mode::Text => view.start_mode(false, window, cx),
+                Mode::Folders => view.start_mode(true, window, cx),
+                Mode::Hex => view.start_hex_mode(window, cx),
+                Mode::Picture => view.start_picture_mode(window, cx),
+                Mode::Table => view.start_table_mode(window, cx),
+                Mode::Start | Mode::Merge => {}
+            });
+        }
+        cx.notify();
     }
 
     pub fn open_start(
@@ -432,6 +518,11 @@ impl Workspace {
     }
 
     fn remember_entry(&self, entry: Recent, cx: &mut Context<Self>) {
+        // Temp files (git's, or `no file`) would push real pairs off the list.
+        let temp = cx.try_global::<crate::app::TempRoot>().map(|t| t.0.clone());
+        if recent::is_throwaway(&entry, temp.as_deref()) {
+            return;
+        }
         let Some(path) = recent_file(cx) else {
             return;
         };
@@ -457,8 +548,12 @@ impl Workspace {
                 }
                 match (view.model(), view.message()) {
                     (Some(model), _) => Some(badge_text(model.block_count())),
-                    (None, Some("Binary files are identical.")) => Some(badge_text(0)),
-                    (None, Some("Binary files differ.")) => Some("≠".to_owned()),
+                    (None, Some(message)) if is_message(message, BINARY_IDENTICAL) => {
+                        Some(badge_text(0))
+                    }
+                    (None, Some(message)) if is_message(message, BINARY_DIFFERS) => {
+                        Some("≠".to_owned())
+                    }
                     (None, _) => Some("!".to_owned()),
                 }
             }
@@ -580,7 +675,7 @@ impl Workspace {
                 };
                 let new = TabKey::Files(left.clone(), right.clone());
                 if !self.rekey(index, new, window, cx) {
-                    view.update(cx, |v, cx| v.undo_swap(OPEN_ELSEWHERE, cx));
+                    view.update(cx, |v, cx| v.undo_swap(tr(OPEN_ELSEWHERE), cx));
                 }
                 cx.notify();
             }
@@ -596,7 +691,7 @@ impl Workspace {
                 if !self.rekey(index, new, window, cx) {
                     tracing::warn!(left = %left.display(), right = %right.display(), "Save As: the pair is open in another tab, so this tab keeps its old key");
                     view.update(cx, |v, cx| {
-                        v.show_notice("Saved. This pair is already open in another tab.", cx)
+                        v.show_notice(tr("Saved. This pair is already open in another tab."), cx)
                     });
                 }
                 cx.notify();
@@ -836,6 +931,13 @@ impl Workspace {
     pub fn open_help(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.tabs.find(&TabKey::Help).is_none() {
             let view = cx.new(|cx| HelpView::new(window, cx));
+            self.subscriptions.push(cx.subscribe_in(
+                &view,
+                window,
+                |this, _, event: &HelpEvent, window, cx| match event {
+                    HelpEvent::LangChosen => this.relabel_tabs(window, cx),
+                },
+            ));
             self.tabs.open(TabKey::Help, || TabItem::Help(view));
         } else {
             self.tabs
@@ -864,6 +966,25 @@ impl Workspace {
         }
     }
 
+    /// The header's language control: the whole app reads in `lang` from the frame this causes.
+    /// Edits stay, no job restarts and an open panel stays open.
+    pub fn set_lang(&mut self, lang: Lang, window: &mut Window, cx: &mut Context<Self>) {
+        if lang == i18n::current() {
+            return;
+        }
+        i18n::choose(lang, cx);
+        self.relabel_tabs(window, cx);
+    }
+
+    /// Every tab, active or not, builds its stored text again, and the window is drawn anew, as a
+    /// theme change does. This runs outside drawing, so no notify is lost.
+    fn relabel_tabs(&self, window: &mut Window, cx: &mut Context<Self>) {
+        for (_, _, item) in self.tabs.iter() {
+            item.relabel(window, cx);
+        }
+        cx.refresh_windows();
+    }
+
     /// A Start tab's welcome card was dismissed: every Start tab hides it (U15).
     fn hide_welcome(&self, cx: &mut Context<Self>) {
         for (_, _, item) in self.tabs.iter() {
@@ -878,9 +999,45 @@ impl Workspace {
         p: &Palette,
         fonts: &Fonts,
         wide: bool,
+        modes_fit: bool,
         scale: f32,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let on_show = self.tabs.active_mode();
+        let modes = Mode::ALL.into_iter().enumerate().map(|(index, mode)| {
+            let last = index + 1 == Mode::ALL.len();
+            ld_segment(
+                ("header-mode", index),
+                mode.label(),
+                on_show == Some(mode),
+                last,
+                p,
+            )
+            .when(on_show == Some(mode), |segment| {
+                segment.border_b_2().border_color(p.accent)
+            })
+            .ld_click(
+                true,
+                cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.go_to_mode(mode, window, cx)
+                }),
+            )
+        });
+        let modes = modes_fit.then(|| ld_segmented("header-modes", modes, p));
+        let chosen = i18n::current();
+        // The words never change: each names its language in that language.
+        let language = |index: usize, label: &'static str, lang: Lang, last: bool| {
+            ld_segment(("header-lang", index), label, chosen == lang, last, p).ld_click(
+                true,
+                cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.set_lang(lang, window, cx)
+                }),
+            )
+        };
+        let languages = [
+            language(0, "ไทย", Lang::Th, false),
+            language(1, "EN", Lang::En, true),
+        ];
         h_flex()
             .id("app-header")
             .test_support()
@@ -914,6 +1071,7 @@ impl Workspace {
                             .children(["D", "U", "E", "T"]),
                     ),
             )
+            .children(modes)
             .child(div().flex_1())
             .when(wide, |d| {
                 d.child(
@@ -930,15 +1088,16 @@ impl Workspace {
                         .text_size(px(12.))
                         .text_color(p.muted)
                         .child(ld_dot(7., p.ins))
-                        .child("Works offline · 100% local"),
+                        .child(tr("Works offline · 100% local")),
                 )
             })
             .child(
-                ld_icon_button("header-help", icons::HELP, "Help (F1)", p).ld_click(
+                ld_icon_button("header-help", icons::HELP, tr("Help (F1)"), p).ld_click(
                     true,
                     cx.listener(|this, _, window, cx| this.open_help(window, cx)),
                 ),
             )
+            .child(ld_segmented("header-lang", languages, p))
             .child(
                 ld_icon_button(
                     "header-theme",
@@ -948,7 +1107,7 @@ impl Workspace {
                     } else {
                         icons::TO_DARK
                     },
-                    "Switch between light and dark",
+                    tr("Switch between light and dark"),
                     p,
                 )
                 .ld_click(
@@ -1016,7 +1175,7 @@ impl Workspace {
                         d.child(ld_dot(7., p.accent).id(("tab-dirty", i)).test_support())
                     })
                     .children(badges[i].clone().map(|badge| {
-                        let ok = badge == "ok";
+                        let ok = is_ok_badge(&badge);
                         let (fg, bg) = if ok {
                             (p.ins, p.bg_ins)
                         } else {
@@ -1028,7 +1187,7 @@ impl Workspace {
                         ld_small_icon_button(
                             ("tab-close", i),
                             icons::CLOSE,
-                            "Close tab (Ctrl+W)",
+                            tr("Close tab (Ctrl+W)"),
                             p,
                         )
                         .w(px(20.))
@@ -1074,7 +1233,7 @@ impl Workspace {
             .border_color(p.line)
             .child(list)
             .child(
-                ld_icon_button("tab-new", icons::NEW_TAB, "New compare (Ctrl+T)", p)
+                ld_icon_button("tab-new", icons::NEW_TAB, tr("New compare (Ctrl+T)"), p)
                     .w(px(34.))
                     .h(px(27.))
                     .rounded_t(px(TAB_RADIUS))
@@ -1286,7 +1445,9 @@ impl Render for Workspace {
         }
         let fonts = Fonts::current(cx);
         let wide = header_pill_visible(window.viewport_size().width);
-        let header = self.render_header(&palette, &fonts, wide, window.scale_factor(), cx);
+        let modes_fit = header_modes_visible(window.viewport_size().width);
+        let header =
+            self.render_header(&palette, &fonts, wide, modes_fit, window.scale_factor(), cx);
         let strip = self.render_tabs(&palette, cx);
         let content = match self.tabs.active() {
             Some(TabItem::Start(view)) => view.clone().into_any_element(),

@@ -3,6 +3,7 @@
 use std::io;
 use std::path::Path;
 
+use crate::i18n::tr_key;
 use crate::settings;
 
 const MODE: &str = "picture.mode";
@@ -41,10 +42,10 @@ impl Mode {
 
     pub fn label(self) -> &'static str {
         match self {
-            Mode::SideBySide => "Side by side",
-            Mode::Difference => "Difference",
-            Mode::Slider => "Slider",
-            Mode::Blink => "Blink",
+            Mode::SideBySide => tr_key("Side by side"),
+            Mode::Difference => tr_key("Difference"),
+            Mode::Slider => tr_key("Slider"),
+            Mode::Blink => tr_key("Blink"),
         }
     }
 }

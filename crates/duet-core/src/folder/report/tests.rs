@@ -29,6 +29,7 @@ fn item(rel: &str, state: ItemState) -> ReportItem {
         similar: false,
         odd_text: [false; 2],
         whole_folder: None,
+        moved_to: None,
     }
 }
 
@@ -529,6 +530,13 @@ fn count_and_size_words_follow_the_app() {
     assert_eq!(human_bytes(1536), "1.5 KiB");
     assert_eq!(human_bytes(1_048_575), "1.0 MiB");
     assert_eq!(human_bytes(4 * 1024 * 1024 * 1024), "4.0 GiB");
+}
+
+#[test]
+fn a_small_size_says_the_thai_unit_word_in_thai() {
+    let _th = crate::i18n::scoped(crate::i18n::Lang::Th);
+    assert_eq!(human_bytes(3), "3 ไบต์");
+    assert_eq!(human_bytes(1536), "1.5 KiB");
 }
 
 #[test]

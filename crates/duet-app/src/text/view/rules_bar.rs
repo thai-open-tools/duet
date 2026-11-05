@@ -2,31 +2,54 @@
 //! presets and the context size, plus "Treat lines like this as unimportant" (R9, `ops:800`).
 
 use duet_core::text::rules::compile_list;
-use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::input::TextareaState;
 
 use super::*;
+use crate::i18n::errors::rule_error;
 use crate::text::prefs::{DEFAULT_CONTEXT_LINES, MAX_CONTEXT_LINES};
+use crate::ui::edit_menu::{ld_input, ld_textarea};
 use crate::ui::fonts::{CODE_SIZE, SMALL_SIZE};
 use crate::ui::style::{RADIUS, ld_primary};
 
 /// The text-rule presets (`ops:595-599`); each is added on a new line.
 pub const PRESETS: [(&str, &str); 4] = [
     (
-        "+ Date and time",
+        tr_key("+ Date and time"),
         r"\d{4}[-/.]\d{2}[-/.]\d{2}[ T]\d{1,2}:\d{2}(:\d{2})?([.,]\d+)?",
     ),
     (
-        "+ GUID",
+        tr_key("+ GUID"),
         r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
     ),
-    ("+ Numbers", r"\d+"),
-    ("+ Version", r"\d+\.\d+(\.\d+)*"),
+    (tr_key("+ Numbers"), r"\d+"),
+    (tr_key("+ Version"), r"\d+\.\d+(\.\d+)*"),
 ];
 
-const TEXT_HELP: &str = "Text that matches is left out before comparing. Lines that differ only there show purple and do not count.";
-const LINES_HELP: &str = "Lines that match are paired as unimportant and do not count.";
-const TEXT_PLACEHOLDER: &str = r"e.g. \d{4}-\d{2}-\d{2}[ T][\d:.,]+  (ignore dates and times)";
-const LINES_PLACEHOLDER: &str = r"e.g. ^\s*//.*$  or  ^#.*generated";
+const TEXT_HELP: &str = tr_key(
+    "Text that matches is left out before comparing. Lines that differ only there show purple and do not count.",
+);
+const LINES_HELP: &str = tr_key("Lines that match are paired as unimportant and do not count.");
+
+/// The examples in the two fields: the patterns stay as they are, the words around them follow
+/// the language.
+fn text_placeholder() -> String {
+    format!(
+        "{} {}  ({})",
+        tr("e.g."),
+        r"\d{4}-\d{2}-\d{2}[ T][\d:.,]+",
+        tr("ignore dates and times")
+    )
+}
+
+fn lines_placeholder() -> String {
+    format!(
+        "{} {}  {}  {}",
+        tr("e.g."),
+        r"^\s*//.*$",
+        tr("or"),
+        r"^#.*generated"
+    )
+}
 
 /// The panel's state while it is open: its fields start from the saved rules and are thrown
 /// away by Cancel and Esc.
@@ -41,7 +64,7 @@ pub(crate) struct RulesBar {
 }
 
 fn rules_field(
-    placeholder: &'static str,
+    placeholder: String,
     value: String,
     window: &mut Window,
     cx: &mut Context<TextView>,
@@ -80,6 +103,23 @@ fn with_line(list: &str, pattern: &str) -> String {
 }
 
 impl TextView {
+    /// The language changed: the open panel's error goes, as every error does, and its two fields
+    /// say their examples in the new language.
+    pub(super) fn relabel_rules(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(bar) = &mut self.rules else {
+            return;
+        };
+        bar.error = None;
+        bar.error_in = None;
+        let (text, lines) = (bar.text.clone(), bar.lines.clone());
+        text.update(cx, |field, cx| {
+            field.set_placeholder(text_placeholder(), window, cx)
+        });
+        lines.update(cx, |field, cx| {
+            field.set_placeholder(lines_placeholder(), window, cx)
+        });
+    }
+
     pub fn rules_open(&self) -> bool {
         self.rules.is_some()
     }
@@ -104,9 +144,14 @@ impl TextView {
         if self.rules.is_none() {
             // Another tab may have saved newer lists.
             self.pull_shared(cx);
-            let text = rules_field(TEXT_PLACEHOLDER, self.prefs.rules_text.clone(), window, cx);
+            let text = rules_field(
+                text_placeholder(),
+                self.prefs.rules_text.clone(),
+                window,
+                cx,
+            );
             let lines = rules_field(
-                LINES_PLACEHOLDER,
+                lines_placeholder(),
                 self.prefs.rules_lines.clone(),
                 window,
                 cx,
@@ -163,7 +208,7 @@ impl TextView {
             .find_map(|(in_text, list)| Some((in_text, compile_list(list).err()?)))
         {
             if let Some(bar) = &mut self.rules {
-                bar.error = Some(format!("Invalid pattern: {err}").into());
+                bar.error = Some(trf("Invalid pattern: {}", &[&rule_error(&err)]).into());
                 bar.error_in = Some(in_text);
             }
             cx.notify();
@@ -318,18 +363,24 @@ impl TextView {
                         .bg(p.bg)
                         .font(fonts.code.clone())
                         .child(
-                            Textarea::new(state)
+                            ld_textarea(state)
                                 .appearance(false)
                                 .text_size(px(CODE_SIZE)),
                         ),
                 )
         };
-        let help = |text: &'static str| div().text_color(p.muted).child(text);
+        let help = |id: &'static str, text: &'static str| {
+            div()
+                .id(id)
+                .test_support()
+                .text_color(p.muted)
+                .prose(tr(text))
+        };
         let presets = h_flex()
             .flex_wrap()
             .gap(px(6.))
             .children(PRESETS.iter().enumerate().map(|(index, (label, _))| {
-                ld_button(format!("text-rules-preset-{index}"), *label, p)
+                ld_button(format!("text-rules-preset-{index}"), tr(label), p)
                     .ld_small()
                     .ld_click(
                         true,
@@ -356,19 +407,19 @@ impl TextView {
                         .child(
                             field(
                                 "text-rules-text",
-                                "Unimportant text (one regex per line)",
+                                tr("Unimportant text (one regex per line)"),
                                 &bar.text,
                             )
-                            .child(help(TEXT_HELP))
+                            .child(help("text-rules-text-help", TEXT_HELP))
                             .child(presets),
                         )
                         .child(
                             field(
                                 "text-rules-lines",
-                                "Unimportant lines (one regex per whole line)",
+                                tr("Unimportant lines (one regex per whole line)"),
                                 &bar.lines,
                             )
-                            .child(help(LINES_HELP)),
+                            .child(help("text-rules-lines-help", LINES_HELP)),
                         ),
                 )
                 .child(
@@ -376,27 +427,27 @@ impl TextView {
                         .flex_wrap()
                         .items_center()
                         .gap(px(8.))
-                        .child("Context lines")
+                        .child(tr("Context lines"))
                         .child(
                             div()
                                 .id("text-rules-context")
                                 .test_support()
                                 .w(px(80.))
-                                .child(Input::new(&bar.context).aria_label("Context lines")),
+                                .child(ld_input(&bar.context).aria_label(tr("Context lines"))),
                         )
                         .children(bar.error.clone().map(|error| {
                             div()
                                 .id("text-rules-error")
                                 .test_support()
                                 .text_color(p.del)
-                                .child(error)
+                                .prose(error)
                         }))
                         .child(div().flex_1())
-                        .child(ld_button("text-rules-cancel", "Cancel", p).ld_click(
+                        .child(ld_button("text-rules-cancel", tr("Cancel"), p).ld_click(
                             true,
                             cx.listener(|this, _, window, cx| this.cancel_rules(window, cx)),
                         ))
-                        .child(ld_primary("text-rules-apply", "Apply", p).ld_click(
+                        .child(ld_primary("text-rules-apply", tr("Apply"), p).ld_click(
                             true,
                             cx.listener(|this, _, window, cx| {
                                 this.apply_rules(window, cx);

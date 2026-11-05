@@ -20,6 +20,7 @@ use gpui_kit::{
 
 use super::*;
 use crate::hex::menu::row_menu;
+use crate::i18n::tr;
 use crate::ui::drag::follow_drag;
 use crate::ui::fonts::{CODE_SIZE, Fonts, code_advance};
 use crate::ui::menu::fill as fill_menu;
@@ -219,7 +220,7 @@ fn ruler(cols: Columns, skip: Pixels, p: &Palette) -> impl IntoElement {
     let cells = line(
         cols,
         [
-            div().child("Offset"),
+            div().child(tr("Offset")),
             div().child(hex.clone()),
             div().child(ascii.clone()),
             div(),

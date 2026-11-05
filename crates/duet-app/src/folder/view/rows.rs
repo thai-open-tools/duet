@@ -1,13 +1,14 @@
 //! The folder view's list: the column titles and one row per visible node.
 
 use crate::folder::cells::{
-    DATE_COL, MID_COL, NAME_SIZE, Pill, SIZE_COL, SideCell, name_min_width, pill_fits, side_cell,
-    side_width, status_style,
+    DATE_COL, MID_COL, MovedTag, NAME_SIZE, Pill, SIZE_COL, SideCell, TAG_SHARE, name_full_width,
+    name_min_width, pill_fits, side_cell, side_width, status_style,
 };
 use crate::folder::model::FolderFilter;
 use crate::folder::odd::odd_tip;
 use crate::folder::ops::{pill_tip, row_tip};
 use crate::format::{count_of, format_size};
+use crate::i18n::{tr, trf};
 use crate::palette::Palette;
 use crate::ui::fonts::{CODE_SIZE, Fonts, code_advance};
 use crate::ui::icons;
@@ -20,8 +21,59 @@ use gpui_kit::{
     div, prelude::*, px, transparent_black,
 };
 use std::ops::Range;
+use std::rc::Rc;
 
 use super::*;
+
+/// The characters of a tag that must fit beside the name, or the tag is left off.
+const MOVED_TAG_MIN_CHARS: usize = 10;
+
+/// The tag of a moved or renamed file for both layouts. `cell_width` is the cell the name and
+/// the tag share when it is known, and `fits(chars)` says whether the whole name and `chars`
+/// characters of tag fit in it: the name wins, so the tag is the first to go and takes only
+/// what the name leaves.
+pub(super) fn moved_tag_of(
+    model: &FolderModel,
+    index: u32,
+    row: usize,
+    cell_width: Option<f32>,
+    fits: &dyn Fn(usize) -> bool,
+    cx: &mut Context<FolderView>,
+) -> Option<MovedTag> {
+    let other = model.node(model.moved_partner(index)?).rel.clone();
+    let text = trf("Moved ↔ {}", &[&other]);
+    if let Some(cell) = cell_width {
+        // The tag is cut to what is left, so it only goes when not even its first letters fit.
+        let room = ((cell * TAG_SHARE - 12.) / 6.).max(0.) as usize;
+        let shortest = text.chars().count().min(room).min(MOVED_TAG_MIN_CHARS);
+        if !fits(shortest) {
+            return None;
+        }
+    }
+    let tip = if model.node(index).status == Status::LeftOnly {
+        trf(
+            "Moved or renamed: the same contents are at {} on the right. Click to go there.",
+            &[&other],
+        )
+    } else {
+        trf(
+            "Moved or renamed: the same contents are at {} on the left. Click to go there.",
+            &[&other],
+        )
+    };
+    let press = Rc::new(cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+        this.jump_to_partner(index, cx);
+        // The tag stops the press, so the row press (which takes the focus) never runs:
+        // without this, Down and Enter would go on to whatever held the focus.
+        window.focus(&this.focus, cx);
+    }));
+    Some(MovedTag {
+        row,
+        text: text.into(),
+        tip: tip.into(),
+        press,
+    })
+}
 
 impl FolderView {
     pub(super) fn render_rows(
@@ -69,7 +121,7 @@ impl FolderView {
                 let tip: Option<SharedString> = match &node.status {
                     Status::Error(message) => Some(message.clone().into()),
                     _ if node.is_dir => {
-                        (below > 0).then(|| format!("{below} differing below").into())
+                        (below > 0).then(|| trf("{} differing below", &[&below]).into())
                     }
                     _ => row_tip(node, time_differs, mode).map(Into::into),
                 };
@@ -94,6 +146,16 @@ impl FolderView {
                     )
                     .into(),
                 });
+                let name_full = name_full_width(&node.name, advance);
+                let depth = node.depth;
+                let moved = moved_tag_of(
+                    model,
+                    index,
+                    row,
+                    cell_width,
+                    &|chars| cell_width.is_none_or(|cell| pill_fits(cell, depth, name_full, chars)),
+                    cx,
+                );
                 let cell = |left: bool| {
                     side_cell(
                         SideCell {
@@ -140,6 +202,7 @@ impl FolderView {
                                 })
                             },
                             name_min,
+                            moved: moved.clone(),
                             pill: pill.clone(),
                             odd: self
                                 .odd
@@ -238,9 +301,9 @@ impl FolderView {
                 .min_w_0()
                 .px(px(8.))
                 .gap(px(6.))
-                .child(div().flex_1().child("Name"))
-                .child(div().w(px(SIZE_COL)).text_right().child("Size"))
-                .child(div().w(px(DATE_COL)).child("Modified"))
+                .child(div().flex_1().child(tr("Name")))
+                .child(div().w(px(SIZE_COL)).text_right().child(tr("Size")))
+                .child(div().w(px(DATE_COL)).child(tr("Modified")))
         };
         h_flex()
             .id("folder-header")

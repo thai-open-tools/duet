@@ -50,10 +50,12 @@ impl TextView {
     }
 
     fn wrap_refused(&self, rows: u32) -> SharedString {
-        format!(
+        trf(
             "Wrap works up to {} rows; this compare has {}.",
-            format_size(self.wrap_limit.into()),
-            format_size(rows.into())
+            &[
+                &format_size(self.wrap_limit.into()),
+                &format_size(rows.into()),
+            ],
         )
         .into()
     }

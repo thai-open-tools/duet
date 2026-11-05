@@ -3,6 +3,7 @@
 pub mod cancel;
 pub mod folder;
 pub mod hex;
+pub mod i18n;
 pub mod kind;
 pub mod picture;
 pub mod table;

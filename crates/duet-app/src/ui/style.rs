@@ -21,10 +21,12 @@ use gpui_kit::{
     transparent_black,
 };
 
+use crate::i18n::tr;
 use crate::palette::Palette;
 pub use crate::status::{StatusPart, Tone, join_parts};
 use crate::ui::fonts::BADGE_SIZE;
 use crate::ui::icons;
+use crate::ui::prose::ProseExt as _;
 
 pub const RADIUS: f32 = 7.;
 pub const TAB_RADIUS: f32 = 8.;
@@ -655,14 +657,24 @@ pub const TOOLTIP_MAX_WIDTH: f32 = 480.;
 /// A tooltip whose text wraps within `TOOLTIP_MAX_WIDTH`, so a long path or message never
 /// runs off the window. Every tooltip duet shows is one of these.
 pub fn ld_tip(text: SharedString, window: &mut Window, cx: &mut App) -> AnyView {
-    Tooltip::element(move |_, _| {
-        div()
-            .id("tooltip-text")
-            .test_support()
-            .max_w(px(TOOLTIP_MAX_WIDTH))
-            .child(text.clone())
-    })
-    .build(window, cx)
+    Tooltip::element(move |_, _| tip_text(text.clone())).build(window, cx)
+}
+
+/// A rough width per character of tooltip text.
+const TOOLTIP_CHAR_WIDTH: f32 = 6.5;
+
+/// A tooltip's text. In Thai its pieces are a wrapping row, which with no width of its own
+/// shrinks to the narrowest piece: one word a line. So it asks for the width the text would
+/// take, up to the tooltip's limit.
+pub fn tip_text(text: SharedString) -> impl IntoElement {
+    let wanted = text.chars().count() as f32 * TOOLTIP_CHAR_WIDTH;
+    div()
+        .id("tooltip-text")
+        .test_support()
+        .aria_label(text.clone())
+        .min_w(px(wanted.min(TOOLTIP_MAX_WIDTH)))
+        .max_w(px(TOOLTIP_MAX_WIDTH))
+        .prose(text)
 }
 
 /// Below this window width the status bar drops its legend.
@@ -716,15 +728,53 @@ pub fn status_parts_text(parts: &[StatusPart], p: &Palette) -> StyledText {
 }
 
 /// The status bar's text: it takes the room the bar has left, and a line too long for it
-/// ends in "…" instead of being cut mid-word. Anything after it in the bar keeps its own room
-/// first.
-pub fn status_line_box(text: impl IntoElement) -> Div {
-    div().flex_1().min_w_0().truncate().child(text)
+/// ends in "…" instead of being cut mid-word or wrapping (the bar never grows a line). Anything
+/// after it in the bar keeps its own room first. The whole sentence, `plain`, is its tooltip,
+/// drawn by `.prose` so Thai wraps between phrases there. `notice` is the colour of a notice,
+/// which shrinks before it grows the bar.
+fn status_box(
+    id: &'static str,
+    plain: impl Into<SharedString>,
+    text: impl IntoElement,
+    notice: Option<Hsla>,
+) -> AnyElement {
+    let tip: SharedString = plain.into();
+    let has_text = !tip.is_empty();
+    div()
+        .id(id)
+        .flex_1()
+        .min_w_0()
+        // A Thai mark on the last letter draws past the measured width, and the cut would take it.
+        .pr(px(4.))
+        .truncate()
+        .when_some(notice, |line, color| line.flex_initial().text_color(color))
+        .child(text)
+        .when(has_text, |line| {
+            line.tooltip(move |window, cx| ld_tip(tip.clone(), window, cx))
+        })
+        .test_support()
+        .into_any_element()
+}
+
+/// The status bar's text, in one line.
+pub fn status_line_box(
+    id: &'static str,
+    plain: impl Into<SharedString>,
+    text: impl IntoElement,
+) -> AnyElement {
+    status_box(id, plain, text, None)
 }
 
 /// Status parts, each in its tone, with a muted " · " between them, as the bar's text.
-pub fn status_parts_row(parts: &[StatusPart], p: &Palette) -> Div {
-    status_line_box(status_parts_text(parts, p))
+pub fn status_parts_row(id: &'static str, parts: &[StatusPart], p: &Palette) -> AnyElement {
+    status_box(id, join_parts(parts), status_parts_text(parts, p), None)
+}
+
+/// A notice in the bar (progress, a refusal, a warning): text colour, one line, cut with an
+/// ellipsis, the whole sentence in its tooltip.
+pub fn status_notice(id: &'static str, notice: impl Into<SharedString>, p: &Palette) -> AnyElement {
+    let notice: SharedString = notice.into();
+    status_box(id, notice.clone(), notice, Some(p.text))
 }
 
 /// The five colours of the diff, each named, so no colour stands alone.
@@ -746,11 +796,11 @@ pub fn legend(id: &'static str, p: &Palette) -> Control {
         .flex_none()
         .gap(px(12.))
         .whitespace_nowrap()
-        .child(item(p.modified, "Changed"))
-        .child(item(p.del, "Left only"))
-        .child(item(p.ins, "Right only"))
-        .child(item(p.moved, "Moved"))
-        .child(item(p.unimp, "Unimportant"))
+        .child(item(p.modified, tr("Changed")))
+        .child(item(p.del, tr("Left only")))
+        .child(item(p.ins, tr("Right only")))
+        .child(item(p.moved, tr("Moved")))
+        .child(item(p.unimp, tr("Unimportant")))
 }
 
 /// The 45° stripes of filler cells. gpui paints the pattern in device pixels, so the stripe

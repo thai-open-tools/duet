@@ -10,6 +10,8 @@ use duet_core::folder::tree::{Node, Side, Status};
 
 use crate::folder::model::{Breakdown, Counts, FolderFilter};
 use crate::format::{count_of, format_size};
+use crate::i18n::errors::describe_format;
+use crate::i18n::{tr, tr_key, tr_str, trf};
 use crate::status::{StatusPart, Tone};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +19,10 @@ pub enum Direction {
     LeftToRight,
     RightToLeft,
 }
+
+/// The reason code of a pair that differs only in its line endings or BOM. A code, matched in
+/// `detail` and never drawn.
+const LINE_ENDINGS: &str = "line endings or BOM";
 
 /// Why a row differs, in one word for the middle column. Folders get a count instead.
 pub fn reason(node: &Node, mode: CompareMode) -> Option<&'static str> {
@@ -41,7 +47,7 @@ pub fn reason(node: &Node, mode: CompareMode) -> Option<&'static str> {
             } else if note.is_some_and(|n| n.encoding_differs()) {
                 "encoding"
             } else if note.is_some_and(|n| n.format_differs()) {
-                "line endings or BOM"
+                LINE_ENDINGS
             } else if l.kind != r.kind {
                 "type"
             } else if l.kind == EntryKind::Symlink {
@@ -62,19 +68,32 @@ pub fn reason(node: &Node, mode: CompareMode) -> Option<&'static str> {
 /// they never claim the same contents (PF13).
 fn matched_by(mode: CompareMode) -> &'static str {
     match mode {
-        CompareMode::Content | CompareMode::Rules => "the contents match",
-        CompareMode::Quick => "the size and modified time match",
-        CompareMode::Size => "the size matches",
+        CompareMode::Content | CompareMode::Rules => tr_key("the contents match"),
+        CompareMode::Quick => tr_key("the size and modified time match"),
+        CompareMode::Size => tr_key("the size matches"),
     }
 }
 
 /// The status line's note about the selected row.
-pub fn selection_text(node: &Node, differing_below: u32, mode: CompareMode) -> String {
-    format!(
-        "Selected: {} — {}",
-        node.rel,
-        detail(node, differing_below, mode)
-    )
+/// `moved_to` is the twin's path when the row is a moved or renamed file.
+pub fn selection_text(
+    node: &Node,
+    differing_below: u32,
+    mode: CompareMode,
+    moved_to: Option<&str>,
+) -> String {
+    let text = match (&node.status, moved_to) {
+        (Status::LeftOnly, Some(rel)) => trf(
+            "only on the left; the same contents are at {} on the right (moved or renamed)",
+            &[&rel],
+        ),
+        (Status::RightOnly, Some(rel)) => trf(
+            "only on the right; the same contents are at {} on the left (moved or renamed)",
+            &[&rel],
+        ),
+        _ => detail(node, differing_below, mode),
+    };
+    trf("Selected: {} — {}", &[&node.rel, &text])
 }
 
 /// Why a row differs, or what it is, in the selection note's words: the middle tooltip of a
@@ -82,50 +101,53 @@ pub fn selection_text(node: &Node, differing_below: u32, mode: CompareMode) -> S
 fn detail(node: &Node, differing_below: u32, mode: CompareMode) -> String {
     let size = |e: &Option<Entry>| e.as_ref().map_or(0, |e| e.len);
     match (&node.status, reason(node, mode)) {
-        (Status::Error(message), _) => message.clone(),
-        (_, Some("size")) => format!(
+        (Status::Error(message), _) => tr_str(message).into_owned(),
+        (_, Some("size")) => trf(
             "size {} → {}",
-            format_size(size(&node.left)),
-            count_of(size(&node.right), "byte", "bytes")
+            &[
+                &format_size(size(&node.left)),
+                &count_of(size(&node.right), "byte", "bytes"),
+            ],
         ),
         (
             Status::Different {
                 newer: Some(Side::Left),
             },
             Some("time"),
-        ) => "same size, left is newer".into(),
+        ) => tr("same size, left is newer").into(),
         (
             Status::Different {
                 newer: Some(Side::Right),
             },
             Some("time"),
-        ) => "same size, right is newer".into(),
-        (_, Some("time")) => "same size, times differ".into(),
-        (_, Some("content")) => "same size, contents differ".into(),
+        ) => tr("same size, right is newer").into(),
+        (_, Some("time")) => tr("same size, times differ").into(),
+        (_, Some("content")) => tr("same size, contents differ").into(),
         (_, Some("EOL/BOM")) => {
-            "same text; only the line endings, final newline or BOM differ".into()
+            tr("same text; only the line endings, final newline or BOM differ").into()
         }
-        (_, Some("unimportant")) => "differs only in unimportant parts".into(),
-        (_, Some("case")) => format!("the names differ only in case; {}", matched_by(mode)),
+        (_, Some("unimportant")) => tr("differs only in unimportant parts").into(),
+        (_, Some("case")) => trf(
+            "the names differ only in case; {}",
+            &[&tr(matched_by(mode))],
+        ),
         (_, Some("whitespace")) => {
-            "only the kind of whitespace or invisible characters differ".into()
+            tr("only the kind of whitespace or invisible characters differ").into()
         }
-        (_, Some("script")) => "a script with CRLF or a BOM".into(),
-        (_, Some("encoding")) => "the same text in another encoding".into(),
-        (_, Some("line endings or BOM")) => {
-            "only the line endings, final newline or BOM differ".into()
-        }
-        (_, Some("type")) => "a file on one side, a folder or link on the other".into(),
-        (_, Some("link")) => "the links point to different targets".into(),
+        (_, Some("script")) => tr("a script with CRLF or a BOM").into(),
+        (_, Some("encoding")) => tr("the same text in another encoding").into(),
+        (_, Some(LINE_ENDINGS)) => tr("only the line endings, final newline or BOM differ").into(),
+        (_, Some("type")) => tr("a file on one side, a folder or link on the other").into(),
+        (_, Some("link")) => tr("the links point to different targets").into(),
         _ if node.is_dir && differing_below > 0 => count_of(
             u64::from(differing_below),
             "differing item inside",
             "differing items inside",
         ),
-        (Status::LeftOnly, _) => "only on the left".into(),
-        (Status::RightOnly, _) => "only on the right".into(),
-        (Status::Pending, _) => "still comparing".into(),
-        _ => "same".into(),
+        (Status::LeftOnly, _) => tr("only on the left").into(),
+        (Status::RightOnly, _) => tr("only on the right").into(),
+        (Status::Pending, _) => tr("still comparing").into(),
+        _ => tr("same").into(),
     }
 }
 
@@ -133,19 +155,21 @@ fn detail(node: &Node, differing_below: u32, mode: CompareMode) -> String {
 pub fn pill_tip(filter: FolderFilter, searching: bool, b: Breakdown) -> String {
     let n = |count: u32| format_size(u64::from(count));
     let total = u64::from(b.different) + u64::from(b.left_only) + u64::from(b.right_only);
-    format!(
+    trf(
         "Files inside that match the “{}” filter{} (files, not lines).\nAll {} in this folder: {} different · {} left only · {} right only · {} same",
-        filter.chip_label(),
-        if searching {
-            " and the path filter"
-        } else {
-            ""
-        },
-        count_of(total + u64::from(b.same), "file", "files"),
-        n(b.different),
-        n(b.left_only),
-        n(b.right_only),
-        n(b.same),
+        &[
+            &tr(filter.chip_label()),
+            &if searching {
+                tr(" and the path filter")
+            } else {
+                ""
+            },
+            &count_of(total + u64::from(b.same), "file", "files"),
+            &n(b.different),
+            &n(b.left_only),
+            &n(b.right_only),
+            &n(b.same),
+        ],
     )
 }
 
@@ -156,65 +180,71 @@ pub fn row_tip(node: &Node, time_differs: bool, mode: CompareMode) -> Option<Str
         return None;
     }
     if let Status::Error(message) = &node.status {
-        return Some(message.clone());
+        return Some(tr_str(message).into_owned());
     }
     let (left, right) = (node.left.as_ref(), node.right.as_ref());
     let spelling = |side: Option<&Entry>| side.map_or("", |e| e.rel.as_str()).to_owned();
     let note = node.note.as_deref();
     let formats = note.and_then(|n| n.formats);
     let sides = formats
-        .map(|[a, b]| format!("\nLeft: {}\nRight: {}", a.describe(), b.describe()))
+        .map(|[a, b]| {
+            trf(
+                "\nLeft: {}\nRight: {}",
+                &[&describe_format(&a), &describe_format(&b)],
+            )
+        })
         .unwrap_or_default();
     let body = if note.is_some_and(|n| n.soft) {
-        "differs only in unimportant parts and the file format"
+        tr("differs only in unimportant parts and the file format")
     } else {
-        "every line matches; only the file format differs"
+        tr("every line matches; only the file format differs")
     };
     let tip = match (&node.status, node.warning()) {
-        (_, Some(Warning::CaseOnly)) => format!(
+        (_, Some(Warning::CaseOnly)) => trf(
             "⚠ The names differ only in case (left: {} · right: {}) and {}.\nOn Windows they are one file; on Linux they are two, and a program that uses the old name may not find it.",
-            spelling(left),
-            spelling(right),
-            matched_by(mode)
+            &[&spelling(left), &spelling(right), &tr(matched_by(mode))],
         ),
-        (_, Some(Warning::OddSpace)) => "⚠ Only the kind of whitespace or invisible characters differ: the files look the same, but the values do not (for example NBSP for a space, LRM or zero-width). Open the pair to see where.".to_owned(),
-        (_, Some(Warning::Script)) => format!(
-            "⚠ A script with CRLF or a BOM may not run on Linux (for example \"/bin/bash^M: bad interpreter\") — {body}{sides}"
+        (_, Some(Warning::OddSpace)) => tr("⚠ Only the kind of whitespace or invisible characters differ: the files look the same, but the values do not (for example NBSP for a space, LRM or zero-width). Open the pair to see where.").to_owned(),
+        (_, Some(Warning::Script)) => trf(
+            "⚠ A script with CRLF or a BOM may not run on Linux (for example \"/bin/bash^M: bad interpreter\") — {}{}",
+            &[&body, &sides],
         ),
-        (Status::Different { .. }, None) if note.is_some_and(|n| n.encoding_differs()) => format!(
-            "The text matches but the encoding differs, so a program may read Thai wrongly — {body}{sides}"
+        (Status::Different { .. }, None) if note.is_some_and(|n| n.encoding_differs()) => trf(
+            "The text matches but the encoding differs, so a program may read Thai wrongly — {}{}",
+            &[&body, &sides],
         ),
         (Status::Similar { .. }, None) if note.is_some_and(|n| n.soft) => {
-            format!("Differs only in unimportant parts{sides}")
+            trf("Differs only in unimportant parts{}", &[&sides])
         }
-        (Status::Similar { .. }, None) => format!("Unimportant: {body}{sides}"),
+        (Status::Similar { .. }, None) => trf("Unimportant: {}{}", &[&body, &sides]),
         (Status::Different { .. }, None) if formats.is_some() => format!("{body}{sides}"),
         (status, None) => {
             let mut tip = match status {
                 Status::Same if time_differs && mode.reads_contents() => {
-                    "Same: the contents match, but the modified times differ".into()
+                    tr("Same: the contents match, but the modified times differ").into()
                 }
-                Status::Same if time_differs => "Same size, but the modified times differ".into(),
+                Status::Same if time_differs => {
+                    tr("Same size, but the modified times differ").into()
+                }
                 // F-04: the reason, as the selection note gives it, and the newer side unless
                 // the reason already names it.
                 Status::Different { newer } => {
                     let newer = match (newer, reason(node, mode)) {
                         (_, Some("time")) | (None, _) => "",
-                        (Some(Side::Left), _) => " (left is newer)",
-                        (Some(Side::Right), _) => " (right is newer)",
+                        (Some(Side::Left), _) => tr(" (left is newer)"),
+                        (Some(Side::Right), _) => tr(" (right is newer)"),
                     };
-                    format!("Different{newer}: {}", detail(node, 0, mode))
+                    trf("Different{}: {}", &[&newer, &detail(node, 0, mode)])
                 }
-                Status::LeftOnly => "Left only".into(),
-                Status::RightOnly => "Right only".into(),
-                Status::Pending => "Still comparing".into(),
-                Status::Same | Status::Similar { .. } | Status::Error(_) => "Same".into(),
+                Status::LeftOnly => tr("Left only").into(),
+                Status::RightOnly => tr("Right only").into(),
+                Status::Pending => tr("Still comparing").into(),
+                Status::Same | Status::Similar { .. } | Status::Error(_) => tr("Same").into(),
             };
             if node.case_differs() {
-                tip.push_str(&format!(
+                tip.push_str(&trf(
                     "\nThe names differ only in case: left {} · right {}",
-                    spelling(left),
-                    spelling(right)
+                    &[&spelling(left), &spelling(right)],
                 ));
             }
             tip
@@ -234,19 +264,28 @@ pub fn parse_masks(text: &str) -> Vec<String> {
 
 /// The status line while a compare runs.
 pub fn progress_text(progress: &FolderProgress) -> String {
+    let moves = progress.moves.total.load(Relaxed);
+    if moves > 0 {
+        return trf(
+            "Looking for moved files… {} of {} · Esc to cancel",
+            &[
+                &format_size(progress.moves.done.load(Relaxed)),
+                &count_of(moves, "file", "files"),
+            ],
+        );
+    }
     let total = progress.content.total.load(Relaxed);
     if total > 0 {
         let done = progress.content.done.load(Relaxed);
-        format!(
+        trf(
             "Comparing contents… {} of {} · Esc to cancel",
-            format_size(done),
-            count_of(total, "file", "files")
+            &[&format_size(done), &count_of(total, "file", "files")],
         )
     } else {
         let items = progress.left.entries.load(Relaxed) + progress.right.entries.load(Relaxed);
-        format!(
+        trf(
             "Scanning… {} · Esc to cancel",
-            count_of(items, "item", "items")
+            &[&count_of(items, "item", "items")],
         )
     }
 }
@@ -278,39 +317,61 @@ pub fn status_parts(
 ) -> Vec<StatusPart> {
     let muted = |text: String| StatusPart::new(text, Tone::Muted);
     let mut parts = vec![
-        muted(format!(
+        muted(trf(
             "Left: {}, {}",
-            count_of(counts.left_files as u64, "file", "files"),
-            count_of(counts.left_bytes, "byte", "bytes")
+            &[
+                &count_of(counts.left_files as u64, "file", "files"),
+                &count_of(counts.left_bytes, "byte", "bytes"),
+            ],
         )),
-        muted(format!(
+        muted(trf(
             "Right: {}, {}",
-            count_of(counts.right_files as u64, "file", "files"),
-            count_of(counts.right_bytes, "byte", "bytes")
+            &[
+                &count_of(counts.right_files as u64, "file", "files"),
+                &count_of(counts.right_bytes, "byte", "bytes"),
+            ],
         )),
-        StatusPart::new(format!("Different {}", counts.different), Tone::Changed),
+        StatusPart::new(trf("Different {}", &[&counts.different]), Tone::Changed),
     ];
     parts.extend([
-        StatusPart::new(format!("Left only {}", counts.left_only), Tone::LeftOnly),
-        StatusPart::new(format!("Right only {}", counts.right_only), Tone::RightOnly),
-        muted(format!("Same {}", counts.same)),
+        StatusPart::new(trf("Left only {}", &[&counts.left_only]), Tone::LeftOnly),
+        StatusPart::new(trf("Right only {}", &[&counts.right_only]), Tone::RightOnly),
     ]);
+    if counts.moved > 0 {
+        parts.push(StatusPart::new(
+            trf("Moved {}", &[&counts.moved]),
+            Tone::Moved,
+        ));
+    }
+    parts.push(muted(trf("Same {}", &[&counts.same])));
     let time_label = if opts.mode.reads_contents() {
-        "Same contents, other time"
+        tr("Same contents, other time")
     } else {
-        "Same size, other time"
+        tr("Same size, other time")
     };
     for (count, text, tone) in [
-        (counts.soft, "≈ unimportant", Tone::Unimportant),
+        (counts.soft, tr("≈ unimportant"), Tone::Unimportant),
         (
             counts.format_only,
-            "≈ line endings or BOM only",
+            tr("≈ line endings or BOM only"),
             Tone::Unimportant,
         ),
         (counts.time_only, time_label, Tone::Moved),
-        (counts.script, "⚠ CRLF or BOM in scripts", Tone::LeftOnly),
-        (counts.odd_space, "⚠ whitespace kind only", Tone::LeftOnly),
-        (counts.case_names, "⚠ names differ in case", Tone::LeftOnly),
+        (
+            counts.script,
+            tr("⚠ CRLF or BOM in scripts"),
+            Tone::LeftOnly,
+        ),
+        (
+            counts.odd_space,
+            tr("⚠ whitespace kind only"),
+            Tone::LeftOnly,
+        ),
+        (
+            counts.case_names,
+            tr("⚠ names differ in case"),
+            Tone::LeftOnly,
+        ),
     ] {
         if count > 0 {
             parts.push(StatusPart::new(format!("{text} {count}"), tone));
@@ -319,68 +380,95 @@ pub fn status_parts(
     if let OddStatus::Done { warn, info } = odd {
         if warn > 0 {
             parts.push(StatusPart::new(
-                format!(
+                trf(
                     "⚠ invisible characters in {}",
-                    count_of(warn as u64, "file", "files")
+                    &[&count_of(warn as u64, "file", "files")],
                 ),
                 Tone::LeftOnly,
             ));
         }
         if info > 0 {
-            parts.push(muted(format!(
+            parts.push(muted(trf(
                 "invisible characters in comments or indentation in {}",
-                count_of(info as u64, "file", "files")
+                &[&count_of(info as u64, "file", "files")],
             )));
         }
     }
     if counts.errors > 0 {
         parts.push(StatusPart::new(
-            format!("Errors {}", counts.errors),
+            trf("Errors {}", &[&counts.errors]),
             Tone::LeftOnly,
         ));
     }
     if !done || counts.pending > 0 {
-        parts.push(muted("Comparing…".to_owned()));
+        parts.push(muted(tr("Comparing…").to_owned()));
     }
-    parts.push(muted(format!("Showing: {}", filter.label())));
+    parts.push(muted(trf("Showing: {}", &[&tr(filter.label())])));
     let mode = match opts.mode {
         CompareMode::Quick => {
-            let mut text = format!("Quick (±{} s", opts.quick.tolerance.as_secs());
+            let seconds = opts.quick.tolerance.as_secs();
             if opts.quick.ignore_dst {
-                text.push_str(", ignore 1 h DST");
+                trf("Quick (±{} s, ignore 1 h DST)", &[&seconds])
+            } else {
+                trf("Quick (±{} s)", &[&seconds])
             }
-            text.push(')');
-            text
         }
-        CompareMode::Content => "Content".to_owned(),
-        CompareMode::Size => "Size only".to_owned(),
-        CompareMode::Rules => "Content with rules".to_owned(),
+        CompareMode::Content => tr("Content").to_owned(),
+        CompareMode::Size => tr("Size only").to_owned(),
+        CompareMode::Rules => tr("Content with rules").to_owned(),
     };
     parts.push(muted(mode));
     if !opts.filters.include.is_empty() {
-        parts.push(muted(format!(
+        parts.push(muted(trf(
             "Include {}",
-            opts.filters.include.join("; ")
+            &[&opts.filters.include.join("; ")],
         )));
     }
     if !opts.filters.exclude.is_empty() {
-        parts.push(muted(format!(
+        parts.push(muted(trf(
             "Exclude {}",
-            opts.filters.exclude.join("; ")
+            &[&opts.filters.exclude.join("; ")],
         )));
     }
     if let (true, Some(took)) = (done, took) {
-        parts.push(muted(format!("{:.2} s", took.as_secs_f64())));
+        parts.push(muted(trf("{} s", &[&format!("{:.2}", took.as_secs_f64())])));
     }
     match odd {
-        OddStatus::Running => parts.push(muted("Looking for invisible characters…".to_owned())),
-        OddStatus::HeldBack(files) => parts.push(muted(format!(
+        OddStatus::Running => parts.push(muted(tr("Looking for invisible characters…").to_owned())),
+        OddStatus::HeldBack(files) => parts.push(muted(trf(
             "Not looking for invisible characters in {}",
-            count_of(files as u64, "file", "files")
+            &[&count_of(files as u64, "file", "files")],
         ))),
         OddStatus::Off | OddStatus::Done { .. } => {}
     }
     parts
+}
+
+/// The Moved chip's tooltip: why it is 0 under a criterion that reads no file, else what its
+/// count counts (pairs; each is two rows).
+pub fn moved_chip_tip(counts: &Counts, mode: CompareMode) -> String {
+    if !mode.reads_contents() {
+        return tr("Moved files are found by reading contents. Choose Content or Text rules.")
+            .into();
+    }
+    trf(
+        "{}, shown as {}: one on each side.",
+        &[
+            &count_of(counts.moved as u64, "moved file", "moved files"),
+            &count_of(counts.moved as u64 * 2, "row", "rows"),
+        ],
+    )
+}
+
+/// The Moved chip's and the empty list's sentence while "Find moved files" is off in the Options
+/// menu (under a criterion that reads contents; the other criteria say that instead).
+pub fn moved_switched_off() -> &'static str {
+    tr("Finding moved files is off. Turn on Find moved files in Options.")
+}
+
+/// Whether the moved-file pass can run at all: the switch is on and the criterion reads contents.
+pub fn moved_search_on(opts: &FolderOptions) -> bool {
+    opts.find_moves && opts.mode.reads_contents()
 }
 
 /// What an empty folder list says: why it is empty, and what to do about it when anything
@@ -391,36 +479,42 @@ pub fn empty_state(
     filter: FolderFilter,
     name_filter: bool,
     masks: bool,
+    mode: CompareMode,
 ) -> (&'static str, Option<&'static str>) {
-    const CHOOSE_ALL: Option<&str> = Some("Choose All to see every file.");
+    let choose_all = Some(tr("Choose All to see every file."));
     if counts.all == 0 {
         if masks {
             (
-                "No files match the include and exclude masks.",
-                Some("Clear the masks to see every file."),
+                tr("No files match the include and exclude masks."),
+                Some(tr("Clear the masks to see every file.")),
             )
         } else {
-            ("Both folders are empty.", None)
+            (tr("Both folders are empty."), None)
         }
     } else if name_filter {
         (
-            "No names match the filter.",
-            Some("Clear the name filter to see every file."),
+            tr("No names match the filter."),
+            Some(tr("Clear the name filter to see every file.")),
         )
+    } else if filter == FolderFilter::Moved {
+        let why = (!mode.reads_contents()).then(|| {
+            tr("Moved files are found only when the criterion reads contents: choose Content or Text rules.")
+        });
+        (tr("No moved files."), why)
     } else if filter == FolderFilter::Mismatch
         && FolderFilter::Mismatch.count(counts) == 0
         && counts.similar > 0
     {
         (
-            "The folders are identical except for unimportant differences (≈).",
-            Some(
+            tr("The folders are identical except for unimportant differences (≈)."),
+            Some(tr(
                 "Choose All to see every file, or turn on \"Count line-ending and BOM differences\" to list them as changes.",
-            ),
+            )),
         )
     } else if filter == FolderFilter::Mismatch && FolderFilter::Mismatch.count(counts) == 0 {
-        ("The folders are identical.", CHOOSE_ALL)
+        (tr("The folders are identical."), choose_all)
     } else {
-        ("No rows match this filter.", CHOOSE_ALL)
+        (tr("No rows match this filter."), choose_all)
     }
 }
 
@@ -567,7 +661,7 @@ mod tests {
         n.status = Status::Different { newer: None };
         n.left.as_mut().unwrap().len = 5;
         assert_eq!(
-            selection_text(&n, 0, CompareMode::Quick),
+            selection_text(&n, 0, CompareMode::Quick, None),
             "Selected: a.txt — size 5 → 1 byte"
         );
     }
@@ -581,13 +675,13 @@ mod tests {
         n.right.as_mut().unwrap().len = 5;
         assert_eq!(reason(&n, CompareMode::Quick), Some("size"));
         assert_eq!(
-            selection_text(&n, 0, CompareMode::Quick),
+            selection_text(&n, 0, CompareMode::Quick, None),
             "Selected: a.txt — size 1 → 5 bytes"
         );
         n.status = Status::Error("Access is denied. (os error 5)".into());
         assert_eq!(reason(&n, CompareMode::Quick), Some("error"));
         assert_eq!(
-            selection_text(&n, 0, CompareMode::Quick),
+            selection_text(&n, 0, CompareMode::Quick, None),
             "Selected: a.txt — Access is denied. (os error 5)"
         );
         let mut dir = node(Some("src"), Some("src"));
@@ -599,7 +693,7 @@ mod tests {
             "folders show a count, not a reason"
         );
         assert_eq!(
-            selection_text(&dir, 1, CompareMode::Quick),
+            selection_text(&dir, 1, CompareMode::Quick, None),
             "Selected: src — 1 differing item inside"
         );
     }
@@ -614,15 +708,33 @@ mod tests {
         let none = Counts::default();
         let choose_all = Some("Choose All to see every file.");
         assert_eq!(
-            empty_state(&same, FolderFilter::Mismatch, false, false),
+            empty_state(
+                &same,
+                FolderFilter::Mismatch,
+                false,
+                false,
+                CompareMode::Content
+            ),
             ("The folders are identical.", choose_all)
         );
         assert_eq!(
-            empty_state(&same, FolderFilter::Different, false, false),
+            empty_state(
+                &same,
+                FolderFilter::Different,
+                false,
+                false,
+                CompareMode::Content
+            ),
             ("No rows match this filter.", choose_all)
         );
         assert_eq!(
-            empty_state(&same, FolderFilter::Mismatch, true, false),
+            empty_state(
+                &same,
+                FolderFilter::Mismatch,
+                true,
+                false,
+                CompareMode::Content
+            ),
             (
                 "No names match the filter.",
                 Some("Clear the name filter to see every file.")
@@ -630,16 +742,22 @@ mod tests {
             "the name filter hid everything"
         );
         assert_eq!(
-            empty_state(&none, FolderFilter::All, false, false),
+            empty_state(&none, FolderFilter::All, false, false, CompareMode::Content),
             ("Both folders are empty.", None)
         );
         assert_eq!(
-            empty_state(&none, FolderFilter::Mismatch, false, false),
+            empty_state(
+                &none,
+                FolderFilter::Mismatch,
+                false,
+                false,
+                CompareMode::Content
+            ),
             ("Both folders are empty.", None),
             "whatever the filter"
         );
         assert_eq!(
-            empty_state(&none, FolderFilter::All, false, true),
+            empty_state(&none, FolderFilter::All, false, true, CompareMode::Content),
             (
                 "No files match the include and exclude masks.",
                 Some("Clear the masks to see every file.")
@@ -891,7 +1009,12 @@ mod tests {
     fn a_different_rows_tip_carries_its_reason() {
         let newer = |side| Status::Different { newer: side };
         let mut n = node(Some("a.txt"), Some("a.txt")).with(newer(None));
-        let both = |n: &Node, mode| (row_tip(n, false, mode).unwrap(), selection_text(n, 0, mode));
+        let both = |n: &Node, mode| {
+            (
+                row_tip(n, false, mode).unwrap(),
+                selection_text(n, 0, mode, None),
+            )
+        };
         assert_eq!(
             both(&n, CONTENT),
             (
@@ -990,7 +1113,7 @@ mod tests {
         for (n, word, text) in cases {
             assert_eq!(reason(&n, CONTENT), Some(word));
             assert_eq!(
-                selection_text(&n, 0, CONTENT),
+                selection_text(&n, 0, CONTENT, None),
                 format!("Selected: a.txt — {text}")
             );
         }
@@ -1019,7 +1142,7 @@ mod tests {
                 "{mode:?}"
             );
             assert_eq!(
-                selection_text(&case, 0, mode),
+                selection_text(&case, 0, mode, None),
                 format!("Selected: a.txt — the names differ only in case; {matched}"),
                 "{mode:?}"
             );
@@ -1096,7 +1219,13 @@ mod tests {
             format_only: 1,
             ..Counts::default()
         };
-        let (title, hint) = empty_state(&counts, FolderFilter::Mismatch, false, false);
+        let (title, hint) = empty_state(
+            &counts,
+            FolderFilter::Mismatch,
+            false,
+            false,
+            CompareMode::Content,
+        );
         assert_eq!(
             title,
             "The folders are identical except for unimportant differences (≈)."
@@ -1105,5 +1234,150 @@ mod tests {
             hint.is_some_and(|h| h.contains("line-ending and BOM")),
             "{hint:?}"
         );
+    }
+
+    #[test]
+    fn a_saved_moved_filter_under_quick_says_why() {
+        let counts = Counts {
+            all: 3,
+            left_only: 1,
+            ..Counts::default()
+        };
+        let quick = empty_state(
+            &counts,
+            FolderFilter::Moved,
+            false,
+            false,
+            CompareMode::Quick,
+        );
+        assert_eq!(quick.0, "No moved files.");
+        assert_eq!(
+            quick.1,
+            Some(
+                "Moved files are found only when the criterion reads contents: choose Content or Text rules."
+            )
+        );
+        let content = empty_state(
+            &counts,
+            FolderFilter::Moved,
+            false,
+            false,
+            CompareMode::Content,
+        );
+        assert_eq!(content, ("No moved files.", None));
+    }
+
+    fn one_sided(rel: &str, status: Status) -> Node {
+        let file = Entry {
+            rel: rel.into(),
+            kind: EntryKind::File,
+            len: 1,
+            modified: None,
+            error: None,
+            link_target: None,
+        };
+        let on_left = status == Status::LeftOnly;
+        Node {
+            name: rel.into(),
+            rel: rel.into(),
+            depth: 0,
+            parent: None,
+            is_dir: false,
+            left: on_left.then(|| file.clone()),
+            right: (!on_left).then_some(file),
+            status,
+            note: None,
+        }
+    }
+
+    #[test]
+    fn selection_text_names_the_other_path_on_both_sides() {
+        let left = one_sided("a.txt", Status::LeftOnly);
+        assert_eq!(
+            selection_text(&left, 0, CompareMode::Content, Some("new/a.txt")),
+            "Selected: a.txt — only on the left; the same contents are at new/a.txt on the right (moved or renamed)"
+        );
+        let right = one_sided("new/a.txt", Status::RightOnly);
+        assert_eq!(
+            selection_text(&right, 0, CompareMode::Content, Some("a.txt")),
+            "Selected: new/a.txt — only on the right; the same contents are at a.txt on the left (moved or renamed)"
+        );
+        assert_eq!(
+            selection_text(&left, 0, CompareMode::Content, None),
+            "Selected: a.txt — only on the left"
+        );
+    }
+
+    #[test]
+    fn status_parts_has_a_moved_part_only_when_there_are_moves() {
+        let opts = FolderOptions::default();
+        let text = |counts: &Counts| {
+            join_parts(&status_parts(
+                counts,
+                FolderFilter::Mismatch,
+                &opts,
+                true,
+                None,
+                OddStatus::Off,
+            ))
+        };
+        assert!(!text(&Counts::default()).contains("Moved"));
+        let some = text(&Counts {
+            moved: 2,
+            ..Counts::default()
+        });
+        assert!(some.contains("Right only 0 · Moved 2 · Same 0"), "{some}");
+    }
+
+    #[test]
+    fn the_progress_line_names_the_move_pass() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let progress = FolderProgress::default();
+        progress.content.total.store(9, Relaxed);
+        progress.content.done.store(9, Relaxed);
+        let before = progress_text(&progress);
+        progress.moves.total.store(20, Relaxed);
+        progress.moves.done.store(5, Relaxed);
+        assert_eq!(
+            progress_text(&progress),
+            "Looking for moved files… 5 of 20 files · Esc to cancel"
+        );
+        progress.moves.total.store(0, Relaxed);
+        assert_eq!(progress_text(&progress), before);
+        progress.moves.total.store(20, Relaxed);
+        let _th = crate::i18n::scoped(crate::i18n::Lang::Th);
+        assert_eq!(
+            progress_text(&progress),
+            "กำลังหาไฟล์ที่ย้าย… 5 จาก 20 ไฟล์ · กด Esc เพื่อยกเลิก"
+        );
+    }
+
+    #[test]
+    fn the_moved_chip_tooltip_says_why_it_is_empty_or_what_it_counts() {
+        let counts = Counts {
+            moved: 3,
+            ..Counts::default()
+        };
+        let why = "Moved files are found by reading contents. Choose Content or Text rules.";
+        assert_eq!(moved_chip_tip(&counts, CompareMode::Quick), why);
+        assert_eq!(moved_chip_tip(&counts, CompareMode::Size), why);
+        assert_eq!(
+            moved_chip_tip(&counts, CompareMode::Content),
+            "3 moved files, shown as 6 rows: one on each side."
+        );
+        let one = Counts {
+            moved: 1,
+            ..Counts::default()
+        };
+        assert_eq!(
+            moved_chip_tip(&one, CompareMode::Rules),
+            "1 moved file, shown as 2 rows: one on each side."
+        );
+        let _th = crate::i18n::scoped(crate::i18n::Lang::Th);
+        assert_eq!(
+            moved_chip_tip(&counts, CompareMode::Content),
+            "3 ไฟล์ที่ย้าย แสดงเป็น 6 แถว: ฝั่งละหนึ่งแถว"
+        );
+        assert!(crate::i18n::missing_keys_for_test().is_empty());
     }
 }

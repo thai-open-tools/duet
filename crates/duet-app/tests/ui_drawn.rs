@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use duet_app::i18n::tr;
 use duet_app::table::view::{DETAIL_WINDOW_CHARS, DetailSide, TableView};
 use duet_app::ui::fonts::{CODE_SIZE, Fonts};
 use gpui_kit::test::{TestAppContextExt as _, TestWindowExt as _};
@@ -14,6 +15,11 @@ use gpui_kit::{
     Pixels, Point, Render, TestAppContext, TestDispatcher, TextRun, Window, WindowBounds,
     WindowOptions, hsla, px, size,
 };
+
+/// Help's language follows the UI's, and English is the default under test.
+fn thai_ui() -> duet_app::i18n::LangScope {
+    duet_app::i18n::scoped(duet_app::i18n::Lang::Th)
+}
 
 /// A test context whose windows shape text with DirectWrite. `current_platform(true)` would
 /// give the no-op text system; `false` builds the real one without opening a window.
@@ -189,6 +195,7 @@ fn the_100_kb_cell_draws_its_changed_character_in_view() {
 /// with glyphs (the T-43 lesson) and sits inside the topic pane, so no row runs past it.
 #[test]
 fn a_thai_help_topic_draws_every_piece_inside_a_narrow_pane() {
+    let _th = thai_ui();
     use duet_app::help::HelpView;
     use duet_app::help::topics::{self, HelpLang, TOPICS};
     let (mut cx, _exec) = directwrite_cx();
@@ -265,6 +272,7 @@ fn a_thai_help_topic_draws_every_piece_inside_a_narrow_pane() {
 /// its box evenly.
 #[test]
 fn a_thai_topic_draws_its_chips_and_keys_and_the_switch_fills_its_box() {
+    let _th = thai_ui();
     use duet_app::help::markup::{self, Span};
     use duet_app::help::topics::{self, HelpLang, TOPICS};
     use duet_app::help::{CHIP_SIZE, HelpView};
@@ -336,7 +344,9 @@ fn a_thai_topic_draws_its_chips_and_keys_and_the_switch_fills_its_box() {
             let drawn = cx
                 .update_window(handle, |_, window, _| window.find((kind, i)).bounds())
                 .unwrap();
-            let width = shaped_width(&mut cx, text, font, size);
+            // A chip draws the label in the language in force (D7); a key cap is the key itself.
+            let shown = if kind == "help-chip" { tr(text) } else { text };
+            let width = shaped_width(&mut cx, shown, font, size);
             assert!(
                 drawn.size.width > width && width > px(0.),
                 "{kind} {i} {text:?} is {drawn:?}, its text {width:?} wide"
@@ -458,6 +468,17 @@ fn open_text_pair(
 /// the row's 12 px.
 #[test]
 fn a_dropdown_label_is_as_tall_as_its_toggle_neighbour() {
+    dropdown_and_toggle_labels();
+}
+
+/// The same in Thai, where the toggle and the dropdown both read Thai.
+#[test]
+fn a_thai_dropdown_label_is_as_tall_as_its_toggle_neighbour() {
+    let _th = thai_ui();
+    dropdown_and_toggle_labels();
+}
+
+fn dropdown_and_toggle_labels() {
     use duet_app::ui::style::LABEL_ID;
     let (mut cx, exec) = directwrite_cx();
     let (_dir, handle, _view) = open_text_pair(&mut cx, &exec, 1400.);
@@ -478,6 +499,59 @@ fn a_dropdown_label_is_as_tall_as_its_toggle_neighbour() {
     finish(cx);
 }
 
+/// The rules panel's two help paragraphs in Thai, at a width that makes them wrap: they break only
+/// between phrases (every piece stays on one line) and stay inside their own box.
+#[test]
+fn the_rules_help_wraps_between_phrases_in_thai() {
+    use duet_app::ui::prose::PIECE_ID;
+    let _th = thai_ui();
+    let (mut cx, exec) = directwrite_cx();
+    let (_dir, handle, view) = open_text_pair(&mut cx, &exec, 700.);
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| v.open_rules(window, cx));
+    })
+    .unwrap();
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    for (help, key) in [
+        (
+            "text-rules-text-help",
+            "Text that matches is left out before comparing. Lines that differ only there show purple and do not count.",
+        ),
+        (
+            "text-rules-lines-help",
+            "Lines that match are paired as unimportant and do not count.",
+        ),
+    ] {
+        let thai = duet_app::i18n::tr(key);
+        assert_ne!(thai, key, "{help} has Thai");
+        let (boxed, pieces) = cx
+            .update_window(handle, |_, window, _| {
+                let boxed = window.find(help).bounds();
+                let scoped = window.within(help);
+                let pieces: Vec<Bounds<Pixels>> = (0usize..)
+                    .map_while(|i| scoped.try_find((PIECE_ID, i)).map(|f| f.bounds()))
+                    .collect();
+                (boxed, pieces)
+            })
+            .unwrap();
+        assert_eq!(
+            pieces.len(),
+            thai.split_inclusive(' ').count(),
+            "{help}: one piece after each space"
+        );
+        let line = pieces.iter().map(|p| p.size.height).min().unwrap();
+        for (i, piece) in pieces.iter().enumerate() {
+            assert_eq!(piece.size.height, line, "{help}: piece {i} on one line");
+            assert!(
+                piece.left() >= boxed.left() && piece.right() <= boxed.right(),
+                "{help}: piece {i} {piece:?} runs past {boxed:?}"
+            );
+        }
+    }
+    finish(cx);
+}
+
 // ---- U15: the Thai welcome card ----
 
 /// The Start tab's welcome card in Thai at 900 px is drawn as the help draws its prose (H6):
@@ -485,6 +559,7 @@ fn a_dropdown_label_is_as_tall_as_its_toggle_neighbour() {
 /// key cap.
 #[test]
 fn the_thai_welcome_card_draws_every_piece_inside_it() {
+    let _th = thai_ui();
     use duet_app::help::topics::{self, HelpLang};
     use duet_app::start::StartView;
     let (mut cx, _exec) = directwrite_cx();
@@ -525,6 +600,63 @@ fn the_thai_welcome_card_draws_every_piece_inside_it() {
     finish(cx);
 }
 
+// ---- Start tiles in Thai ----
+
+/// Thai tiles at 1400 and 900 px: every tile's title and every piece of its line is laid out
+/// by DirectWrite inside the tile, and the tile's text is not wider than the tile.
+#[test]
+fn the_thai_start_tiles_keep_their_text_inside_them() {
+    let _th = thai_ui();
+    use duet_app::start::StartView;
+    use duet_app::ui::prose::PIECE_ID;
+    const TILES: [&str; 6] = [
+        "start-mode-files",
+        "start-mode-folders",
+        "start-mode-merge",
+        "start-mode-hex",
+        "start-mode-table",
+        "start-mode-picture",
+    ];
+    for width in [1400., 900.] {
+        let (mut cx, _exec) = directwrite_cx();
+        let (handle, _view) = open_window(&mut cx, (width, 800.), |window, cx| {
+            let view = cx.new(|cx| StartView::new(None, window, cx));
+            window.focus(&view.focus_handle(cx), cx);
+            view
+        });
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        for id in TILES {
+            let (tile, pieces) = cx
+                .update_window(handle, |_, window, _| {
+                    let tile = window.find(id).bounds();
+                    let scoped = window.within(id);
+                    let pieces: Vec<Bounds<Pixels>> = (0usize..)
+                        .map_while(|i| scoped.try_find((PIECE_ID, i)).map(|f| f.bounds()))
+                        .collect();
+                    (tile, pieces)
+                })
+                .unwrap();
+            assert!(tile.size.width > px(100.), "{id} at {width}: {tile:?}");
+            assert!(
+                pieces.len() >= 2,
+                "{id} at {width} draws its line in pieces: {pieces:?}"
+            );
+            let line = pieces.iter().map(|p| p.size.height).min().unwrap();
+            for (i, piece) in pieces.iter().enumerate() {
+                assert_eq!(piece.size.height, line, "{id} piece {i} stays on one line");
+                assert!(
+                    piece.left() >= tile.left()
+                        && piece.right() <= tile.right()
+                        && piece.bottom() <= tile.bottom(),
+                    "{id} piece {i} {piece:?} runs past its tile {tile:?} at {width} px"
+                );
+            }
+        }
+        finish(cx);
+    }
+}
+
 // ---- U16 / U17: the toolbar rows at 1400 px ----
 
 /// Asserts that every control of `ids` is drawn inside `row` on one line: each one's middle is
@@ -560,6 +692,17 @@ fn on_one_line(
 /// bar's info, and "On save" and the font size end the main row, before find and go to.
 #[test]
 fn the_text_view_has_two_toolbar_rows_at_1400_px() {
+    text_toolbar_rows();
+}
+
+/// The same rows with the UI in Thai: a label that grew must not push a control to a new line.
+#[test]
+fn the_text_view_has_two_toolbar_rows_at_1400_px_in_thai() {
+    let _th = thai_ui();
+    text_toolbar_rows();
+}
+
+fn text_toolbar_rows() {
     let (mut cx, exec) = directwrite_cx();
     let (_dir, handle, _view) = open_text_pair(&mut cx, &exec, 1400.);
     cx.update_window(handle, |_, window, cx| window.render_frame(cx))
@@ -592,6 +735,7 @@ fn the_text_view_has_two_toolbar_rows_at_1400_px() {
         &[
             "text-swap",
             "text-reload",
+            "text-sort-keys",
             "text-next",
             "text-report",
             "text-save-options",
@@ -626,6 +770,17 @@ fn the_text_view_has_two_toolbar_rows_at_1400_px() {
 /// "Filter paths" after Exclude and before Options, and the chips with the file actions.
 #[test]
 fn the_folder_view_has_three_toolbar_rows_at_1400_px() {
+    folder_toolbar_rows();
+}
+
+/// The same rows with the UI in Thai: a label that grew must not push a control to a new line.
+#[test]
+fn the_folder_view_has_three_toolbar_rows_at_1400_px_in_thai() {
+    let _th = thai_ui();
+    folder_toolbar_rows();
+}
+
+fn folder_toolbar_rows() {
     use duet_app::folder::view::FolderView;
     let (mut cx, exec) = directwrite_cx();
     let dir = tempfile::tempdir().unwrap();
@@ -668,6 +823,7 @@ fn the_folder_view_has_three_toolbar_rows_at_1400_px() {
         &[
             "folder-chip-all",
             "folder-chip-same",
+            "folder-chip-moved",
             "folder-layout",
             "folder-expand-all",
             "folder-legend",
@@ -878,5 +1034,1130 @@ fn bench_a_resize_drag_with_directwrite() {
             ms(start.elapsed())
         );
     }
+    finish(cx);
+}
+
+// ---- Plan B task 4: prose that wraps between phrases ----
+
+/// A box of `width` px holding `.prose(text)`, and nothing else.
+struct ProseBox {
+    text: gpui_kit::SharedString,
+    width: f32,
+    mode: Mode,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    /// `.prose(text)`.
+    Prose,
+    /// `.child(text)`, what English `.prose` must equal.
+    Plain,
+    /// Drawn as a tooltip is, so its own width limit applies.
+    Tooltip,
+}
+
+impl Render for ProseBox {
+    fn render(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        use duet_app::ui::prose::ProseExt as _;
+        use gpui_kit::prelude::*;
+        use gpui_kit::{TestSupportExt as _, div};
+        let inner = match self.mode {
+            Mode::Tooltip => div()
+                .child(duet_app::ui::style::ld_tip(self.text.clone(), window, cx))
+                .into_any_element(),
+            Mode::Prose => div()
+                .id("prose-text")
+                .test_support()
+                .prose(self.text.clone())
+                .into_any_element(),
+            Mode::Plain => div()
+                .id("prose-text")
+                .test_support()
+                .child(self.text.clone())
+                .into_any_element(),
+        };
+        div()
+            .id("prose-box")
+            .test_support()
+            .w(px(self.width))
+            .child(inner)
+    }
+}
+
+fn open_prose(cx: &mut TestAppContext, text: &str, width: f32, mode: Mode) -> AnyWindowHandle {
+    let text: gpui_kit::SharedString = text.to_owned().into();
+    let (handle, _view) = open_window(cx, (900., 700.), move |_, cx| {
+        cx.new(|_| ProseBox { text, width, mode })
+    });
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    handle
+}
+
+/// The bounds of every piece the last frame drew, in order.
+fn prose_pieces(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Vec<Bounds<Pixels>> {
+    cx.update_window(handle, |_, window, _| {
+        (0usize..)
+            .map_while(|i| {
+                window
+                    .try_find((duet_app::ui::prose::PIECE_ID, i))
+                    .map(|found| found.bounds())
+            })
+            .collect()
+    })
+    .unwrap()
+}
+
+const THAI_SENTENCE: &str =
+    "เปิดสองโฟลเดอร์จากแท็บเริ่มต้น แล้วเลือกจุดต่างที่ต้องการดู ปุ่มเทียบใหม่อยู่ด้านบนของหน้าต่าง ";
+
+#[test]
+fn thai_prose_breaks_only_between_pieces() {
+    let _th = thai_ui();
+    let (mut cx, _exec) = directwrite_cx();
+    let text = THAI_SENTENCE.repeat(2);
+    let handle = open_prose(&mut cx, &text, 420., Mode::Prose);
+    let boxed = bounds_of(&mut cx, handle, "prose-box");
+    let pieces = prose_pieces(&mut cx, handle);
+    let expected = text.split_inclusive(' ').count();
+    assert_eq!(pieces.len(), expected, "one piece after each space");
+    let line = pieces.iter().map(|p| p.size.height).min().unwrap();
+    for (i, piece) in pieces.iter().enumerate() {
+        assert_eq!(piece.size.height, line, "piece {i} stays on one line");
+        assert!(
+            piece.left() >= boxed.left() && piece.right() <= boxed.right(),
+            "piece {i} {piece:?} runs past the box {boxed:?}"
+        );
+    }
+    let mut tops: Vec<_> = pieces.iter().map(|p| p.top()).collect();
+    tops.dedup();
+    assert!(tops.len() >= 3, "and the text wraps: {} lines", tops.len());
+    finish(cx);
+}
+
+/// The sync panel's summary, as the panel would say it in Thai, drawn the way `.prose` draws it:
+/// it breaks between phrases and keeps every piece inside its box.
+#[test]
+fn the_thai_sync_summary_wraps_between_phrases() {
+    use duet_app::folder::sync_panel::{SyncScope, sync_summary};
+    use duet_app::folder::view::FolderView;
+    let _th = thai_ui();
+    let (mut cx, exec) = directwrite_cx();
+    let dir = tempfile::tempdir().unwrap();
+    let (left, right) = (dir.path().join("l"), dir.path().join("r"));
+    for side in [&left, &right] {
+        std::fs::create_dir_all(side).unwrap();
+    }
+    std::fs::write(left.join("new.txt"), "new").unwrap();
+    std::fs::write(right.join("newer.txt"), "old").unwrap();
+    std::fs::write(left.join("newer.txt"), "newer than the right one").unwrap();
+    let later = std::time::SystemTime::now() + Duration::from_secs(3600);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(left.join("newer.txt"))
+        .unwrap()
+        .set_modified(later)
+        .unwrap();
+    let (handle, view) = open_window(&mut cx, (900., 700.), move |window, cx| {
+        let options = duet_core::folder::run::FolderOptions::default();
+        cx.new(|cx| FolderView::new(left, right, options, window, cx))
+    });
+    let loaded = view.clone();
+    exec.block_test(cx.wait_for(handle, Duration::from_secs(30), move |_, cx| {
+        !loaded.read(cx).is_busy()
+    }));
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| v.open_sync(SyncScope::All, window, cx))
+    })
+    .unwrap();
+    let planned = view.clone();
+    exec.block_test(cx.wait_for(handle, Duration::from_secs(30), move |_, cx| {
+        planned.read(cx).sync_plan_shown().is_some()
+    }));
+    let text = view.read_with(&cx, |v, _| sync_summary(v.sync_plan_shown().unwrap()));
+    assert!(!text.contains("Copy"), "in Thai: {text}");
+    let probe = open_prose(&mut cx, &text, 360., Mode::Prose);
+    let boxed = bounds_of(&mut cx, probe, "prose-box");
+    let pieces = prose_pieces(&mut cx, probe);
+    assert_eq!(
+        pieces.len(),
+        text.split_inclusive(' ').count(),
+        "one piece after each space"
+    );
+    let line = pieces.iter().map(|p| p.size.height).min().unwrap();
+    for (i, piece) in pieces.iter().enumerate() {
+        assert_eq!(piece.size.height, line, "piece {i} stays on one line");
+        assert!(
+            piece.left() >= boxed.left() && piece.right() <= boxed.right(),
+            "piece {i} {piece:?} runs past the box {boxed:?}"
+        );
+    }
+    let mut tops: Vec<_> = pieces.iter().map(|p| p.top()).collect();
+    tops.dedup();
+    assert!(tops.len() >= 2, "and the text wraps: {} lines", tops.len());
+    finish(cx);
+}
+
+#[test]
+fn a_thai_message_with_a_long_path_stays_inside_its_box() {
+    let _th = thai_ui();
+    let (mut cx, _exec) = directwrite_cx();
+    let path = ["C:\\", &"folder\\".repeat(30), "file.txt"].concat();
+    assert!(path.len() > 200);
+    let text = format!("เปิดไฟล์ {path} ไม่ได้ ไฟล์อาจถูกย้ายหรือลบแล้ว");
+    let handle = open_prose(&mut cx, &text, 300., Mode::Prose);
+    let boxed = bounds_of(&mut cx, handle, "prose-box");
+    let pieces = prose_pieces(&mut cx, handle);
+    assert!(pieces.len() >= 4);
+    for (i, piece) in pieces.iter().enumerate() {
+        assert!(
+            piece.left() >= boxed.left() && piece.right() <= boxed.right(),
+            "piece {i} {piece:?} runs past the box {boxed:?}"
+        );
+    }
+    let text_box = bounds_of(&mut cx, handle, "prose-text");
+    assert!(
+        text_box.right() <= boxed.right(),
+        "{text_box:?} in {boxed:?}"
+    );
+    finish(cx);
+}
+
+#[test]
+fn a_thai_tooltip_stays_inside_its_width() {
+    let _th = thai_ui();
+    let (mut cx, _exec) = directwrite_cx();
+    let path = ["C:\\", &"folder\\".repeat(40), "file.txt"].concat();
+    let text = format!("{THAI_SENTENCE}{path} {THAI_SENTENCE}");
+    let handle = open_prose(&mut cx, &text, 900., Mode::Tooltip);
+    let tip = bounds_of(&mut cx, handle, "tooltip-text");
+    assert!(
+        tip.size.width <= px(duet_app::ui::style::TOOLTIP_MAX_WIDTH) + px(0.5),
+        "the tooltip is {:?} wide",
+        tip.size.width
+    );
+    let pieces = prose_pieces(&mut cx, handle);
+    assert!(pieces.len() > 5);
+    for (i, piece) in pieces.iter().enumerate() {
+        assert!(
+            piece.left() >= tip.left() && piece.right() <= tip.right() + px(0.5),
+            "piece {i} {piece:?} runs past the tooltip {tip:?}"
+        );
+    }
+    // A line break in the text: the second line starts a row of its own, in order, below the
+    // first, and no piece is a two-line cell.
+    let two_lines = "แถวแรก สั้น\nแถวสอง ต่อมา\nแถวสาม";
+    let handle = open_prose(&mut cx, two_lines, 900., Mode::Tooltip);
+    let pieces = prose_pieces(&mut cx, handle);
+    assert_eq!(pieces.len(), 5, "one piece per word, none holding a break");
+    let line = pieces.iter().map(|p| p.size.height).min().unwrap();
+    for (i, piece) in pieces.iter().enumerate() {
+        assert_eq!(piece.size.height, line, "piece {i} stays on one line");
+    }
+    assert_eq!(pieces[0].top(), pieces[1].top(), "line one");
+    assert!(pieces[0].left() < pieces[1].left());
+    assert!(pieces[2].top() >= pieces[1].bottom(), "line two is below");
+    assert_eq!(pieces[2].top(), pieces[3].top(), "line two");
+    assert!(pieces[2].left() < pieces[3].left());
+    assert!(
+        pieces[2].left() <= pieces[0].left() + px(0.5),
+        "from the left"
+    );
+    assert!(pieces[4].top() >= pieces[3].bottom(), "line three is below");
+    finish(cx);
+}
+
+#[test]
+fn english_prose_is_one_text_child() {
+    let (mut cx, _exec) = directwrite_cx();
+    let text = "Open two folders from the Start tab, then pick the difference you want to see";
+    let prose = open_prose(&mut cx, text, 200., Mode::Prose);
+    let plain = open_prose(&mut cx, text, 200., Mode::Plain);
+    assert!(
+        prose_pieces(&mut cx, prose).is_empty(),
+        "English draws no pieces"
+    );
+    let (prose, plain) = (
+        bounds_of(&mut cx, prose, "prose-text"),
+        bounds_of(&mut cx, plain, "prose-text"),
+    );
+    assert_eq!(prose, plain, "the same text laid out the same way");
+    assert!(prose.size.height > px(30.), "and it wraps: {prose:?}");
+    finish(cx);
+}
+
+// ---- The merge tab in Thai ----
+
+/// A merge view over typed texts (one conflict) at `width`, loaded and drawn.
+fn open_merge(
+    cx: &mut TestAppContext,
+    exec: &ForegroundExecutor,
+    width: f32,
+    merged: bool,
+) -> (AnyWindowHandle, Entity<duet_app::merge::view::MergeView>) {
+    use duet_app::launch::MergePaths;
+    use duet_app::merge::view::MergeView;
+    use duet_core::text::merge::MergeText;
+    let (handle, view) = open_window(cx, (width, 800.), move |window, cx| {
+        let view = cx.new(|cx| {
+            if merged {
+                let typed = |text: &str| MergeText::typed(text.to_owned());
+                MergeView::with_texts_for_test(
+                    [
+                        typed(
+                            "a
+X
+c
+",
+                        ),
+                        typed(
+                            "a
+b
+c
+",
+                        ),
+                        typed(
+                            "a
+Y
+c
+",
+                        ),
+                    ],
+                    window,
+                    cx,
+                )
+            } else {
+                MergeView::new(MergePaths::default(), window, cx)
+            }
+        });
+        window.focus(&view.focus_handle(cx), cx);
+        view
+    });
+    let loaded = view.clone();
+    exec.block_test(cx.wait_for(handle, Duration::from_secs(30), move |_, cx| {
+        !loaded.read(cx).is_busy()
+    }));
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    (handle, view)
+}
+
+/// How many lines the controls `ids` sit on: their vertical centres, within a pixel.
+fn rows_of(cx: &mut TestAppContext, handle: AnyWindowHandle, ids: &[&'static str]) -> usize {
+    let mut centres: Vec<Pixels> = cx
+        .update_window(handle, |_, window, _| {
+            ids.iter()
+                .map(|id| window.find(*id).bounds().center().y)
+                .collect()
+        })
+        .unwrap();
+    centres.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mut rows = 0;
+    let mut last: Option<Pixels> = None;
+    for y in centres {
+        if last.is_none_or(|l| (y - l).abs() > px(1.)) {
+            rows += 1;
+        }
+        last = Some(y);
+    }
+    rows
+}
+
+/// The merge toolbar, the input stage's bar and the info bar, at 1400 px: the rows each takes.
+fn merge_rows() -> [usize; 3] {
+    use duet_app::merge::view::Stage;
+    let (mut cx, exec) = directwrite_cx();
+    let (handle, view) = open_merge(&mut cx, &exec, 1400., true);
+    let toolbar = rows_of(
+        &mut cx,
+        handle,
+        &[
+            "merge-stage-seg",
+            "merge-prev",
+            "merge-pos",
+            "merge-next",
+            "merge-all-left",
+            "merge-all-right",
+            "merge-trail",
+            "merge-show-result",
+            "merge-copy",
+            "merge-export",
+            "merge-save",
+        ],
+    );
+    let info = rows_of(&mut cx, handle, &["merge-info", "merge-save-as"]);
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| v.set_stage(Stage::Input, cx));
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let input = rows_of(
+        &mut cx,
+        handle,
+        &[
+            "merge-mode",
+            "merge-output",
+            "merge-swap",
+            "merge-clear",
+            "merge-run",
+        ],
+    );
+    finish(cx);
+    [toolbar, info, input]
+}
+
+#[test]
+fn thai_merge_toolbar_takes_no_more_rows_than_english() {
+    let english = merge_rows();
+    let thai = {
+        let _th = thai_ui();
+        merge_rows()
+    };
+    assert_eq!(english[0], 1, "the English toolbar is one line at 1400 px");
+    for (i, (en, th)) in english.iter().zip(thai).enumerate() {
+        assert!(
+            th <= *en,
+            "bar {i} takes {th} rows in Thai, {en} in English"
+        );
+    }
+}
+
+/// The input stage's explanation in Thai, narrow enough to wrap: every paragraph breaks only
+/// between phrases and stays inside its own box, the coloured words among them.
+#[test]
+fn a_thai_merge_intro_wraps_between_phrases() {
+    use duet_app::ui::prose::PIECE_ID;
+    let _th = thai_ui();
+    let (mut cx, exec) = directwrite_cx();
+    let (handle, _view) = open_merge(&mut cx, &exec, 400., false);
+    let tr = duet_app::i18n::tr;
+    for (id, parts) in [
+        (
+            "merge-hint-title",
+            vec!["3-way merge: combine the edits of two sides."],
+        ),
+        (
+            "merge-hint-choose",
+            vec![
+                "Choose ",
+                "Left",
+                " (your version), ",
+                "Base",
+                " (the common original both sides started from) and ",
+                "Right",
+                " (their version).",
+            ],
+        ),
+        (
+            "merge-hint-parts",
+            vec![
+                "Parts changed on one side only, or changed the same way on both, merge on their own. Parts both sides changed differently are ",
+                "conflicts",
+                ": choose left, right, both, base or type the result, then save.",
+            ],
+        ),
+        (
+            "merge-hint-drop",
+            vec![
+                "Drop 3 files at once for left, base and right in that order, drop 1 file on its slot, or switch to “Paste text”.",
+            ],
+        ),
+    ] {
+        let want: usize = parts
+            .iter()
+            .map(|key| {
+                assert_ne!(tr(key), *key, "{key} has Thai");
+                tr(key).split_inclusive(' ').count()
+            })
+            .sum();
+        let (boxed, pieces) = cx
+            .update_window(handle, |_, window, _| {
+                let boxed = window.find(id).bounds();
+                let scoped = window.within(id);
+                let pieces: Vec<Bounds<Pixels>> = (0usize..)
+                    .map_while(|i| scoped.try_find((PIECE_ID, i)).map(|f| f.bounds()))
+                    .collect();
+                (boxed, pieces)
+            })
+            .unwrap();
+        assert_eq!(pieces.len(), want, "{id}: one piece after each space");
+        let line = pieces.iter().map(|p| p.size.height).min().unwrap();
+        for (i, piece) in pieces.iter().enumerate() {
+            assert_eq!(piece.size.height, line, "{id}: piece {i} on one line");
+            assert!(
+                piece.left() >= boxed.left() && piece.right() <= boxed.right(),
+                "{id}: piece {i} {piece:?} runs past {boxed:?}"
+            );
+        }
+        assert!(
+            id == "merge-hint-title" || boxed.size.height > line,
+            "{id}: at 400 px the paragraph wraps ({boxed:?})"
+        );
+    }
+    finish(cx);
+}
+
+// ---- The table, hex and picture toolbars in Thai ----
+
+/// A thai test for a bar: it takes no more rows in Thai than in English at 1400 px.
+fn no_more_rows_in_thai(english: &[usize], thai: &[usize]) {
+    assert_eq!(english.len(), thai.len());
+    for (i, (en, th)) in english.iter().zip(thai).enumerate() {
+        assert!(th <= en, "bar {i} takes {th} rows in Thai, {en} in English");
+    }
+}
+
+/// The table view's toolbar and options row, at 1400 px: the rows each takes.
+fn table_rows() -> [usize; 2] {
+    let (mut cx, exec) = directwrite_cx();
+    let (handle, view) = open_window(&mut cx, (1400., 760.), |window, cx| {
+        let view = cx.new(|cx| {
+            TableView::with_text_for_test("id,v\n1,a\n2,b\n", "id,v\n1,a\n2,c\n", window, cx)
+        });
+        window.focus(&view.focus_handle(cx), cx);
+        view
+    });
+    let loaded = view.clone();
+    exec.block_test(cx.wait_for(handle, Duration::from_secs(30), move |_, cx| {
+        !loaded.read(cx).is_busy()
+    }));
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    let toolbar = rows_of(
+        &mut cx,
+        handle,
+        &[
+            "table-open-left",
+            "table-paste-left",
+            "table-left-name",
+            "table-open-right",
+            "table-paste-right",
+            "table-right-name",
+            "table-first",
+            "table-prev",
+            "table-position",
+            "table-next",
+            "table-last",
+            "table-swap",
+            "table-reload",
+            "table-find",
+            "table-export",
+        ],
+    );
+    let options = rows_of(
+        &mut cx,
+        handle,
+        &[
+            "table-delimiter",
+            "table-header",
+            "table-ignore-case",
+            "table-trim",
+            "table-numbers",
+            "table-keys",
+            "table-chip-all",
+            "table-chip-diff",
+            "table-chip-same",
+            "table-chip-left",
+            "table-chip-right",
+        ],
+    );
+    finish(cx);
+    [toolbar, options]
+}
+
+/// The same toolbars with two workbooks loaded, at 1400 px: the sheet pickers are in the toolbar
+/// and the Delimiter menu is gone from the options row.
+fn table_book_rows() -> [usize; 2] {
+    use duet_core::table::xlsx::fixture::{SheetSpec, workbook};
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.xlsx"), dir.path().join("b.xlsx"));
+    // Sheet names as long as a person gives them, so the picker is as wide as it gets.
+    let sheets = [
+        SheetSpec::text_rows("Quarterly sales summary", &[&["id", "v"], &["1", "a"]]),
+        SheetSpec::text_rows("Notes", &[&["id"], &["1"]]),
+    ];
+    std::fs::write(&a, workbook(&sheets)).unwrap();
+    std::fs::write(&b, workbook(&sheets)).unwrap();
+    let (mut cx, exec) = directwrite_cx();
+    let (handle, view) = open_window(&mut cx, (1400., 760.), move |window, cx| {
+        let view = cx.new(|cx| TableView::new(a, b, window, cx));
+        window.focus(&view.focus_handle(cx), cx);
+        view
+    });
+    let loaded = view.clone();
+    exec.block_test(cx.wait_for(handle, Duration::from_secs(30), move |_, cx| {
+        !loaded.read(cx).is_busy()
+    }));
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    let toolbar = rows_of(
+        &mut cx,
+        handle,
+        &[
+            "table-open-left",
+            "table-paste-left",
+            "table-left-name",
+            "table-sheet-left",
+            "table-open-right",
+            "table-paste-right",
+            "table-right-name",
+            "table-sheet-right",
+            "table-first",
+            "table-prev",
+            "table-position",
+            "table-next",
+            "table-last",
+            "table-swap",
+            "table-reload",
+            "table-find",
+            "table-export",
+        ],
+    );
+    let options = rows_of(
+        &mut cx,
+        handle,
+        &[
+            "table-header",
+            "table-ignore-case",
+            "table-trim",
+            "table-numbers",
+            "table-keys",
+            "table-chip-all",
+            "table-chip-diff",
+            "table-chip-same",
+            "table-chip-left",
+            "table-chip-right",
+        ],
+    );
+    finish(cx);
+    [toolbar, options]
+}
+
+#[test]
+fn the_sheet_pickers_add_no_row_to_the_table_toolbar_in_either_language() {
+    let english = table_book_rows();
+    assert_eq!(
+        english[0], 1,
+        "the English toolbar with pickers is one line at 1400 px"
+    );
+    let thai = {
+        let _th = thai_ui();
+        table_book_rows()
+    };
+    no_more_rows_in_thai(&english, &thai);
+    assert_eq!(thai[0], 1, "and so is the Thai one");
+}
+
+#[test]
+fn thai_table_toolbars_take_no_more_rows_than_english() {
+    let english = table_rows();
+    let thai = {
+        let _th = thai_ui();
+        table_rows()
+    };
+    assert_eq!(english[0], 1, "the English toolbar is one line at 1400 px");
+    no_more_rows_in_thai(&english, &thai);
+}
+
+/// The hex view's toolbar at 1400 px: the rows it takes.
+fn hex_rows() -> [usize; 1] {
+    use duet_app::hex::view::HexView;
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.bin"), dir.path().join("b.bin"));
+    std::fs::write(&a, [0u8; 64]).unwrap();
+    std::fs::write(&b, [1u8; 64]).unwrap();
+    let (mut cx, exec) = directwrite_cx();
+    let (handle, view) = open_window(&mut cx, (1400., 760.), move |window, cx| {
+        let view = cx.new(|cx| HexView::new(a, b, window, cx));
+        window.focus(&view.focus_handle(cx), cx);
+        view
+    });
+    let loaded = view.clone();
+    exec.block_test(cx.wait_for(handle, Duration::from_secs(30), move |_, cx| {
+        !loaded.read(cx).is_busy()
+    }));
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    let toolbar = rows_of(
+        &mut cx,
+        handle,
+        &[
+            "hex-first",
+            "hex-prev",
+            "hex-position",
+            "hex-next",
+            "hex-last",
+            "hex-swap",
+            "hex-reload",
+            "hex-bpr",
+            "hex-filter",
+            "hex-goto",
+            "hex-goto-go",
+            "hex-find",
+            "hex-copy",
+        ],
+    );
+    finish(cx);
+    [toolbar]
+}
+
+#[test]
+fn thai_hex_toolbar_takes_no_more_rows_than_english() {
+    let english = hex_rows();
+    let thai = {
+        let _th = thai_ui();
+        hex_rows()
+    };
+    assert_eq!(english[0], 1, "the English toolbar is one line at 1400 px");
+    no_more_rows_in_thai(&english, &thai);
+}
+
+/// The picture view's toolbar and heads at 1400 px: the rows each takes.
+fn picture_rows() -> [usize; 2] {
+    use duet_app::picture::view::PictureView;
+    use duet_core::picture::Picture;
+    use duet_core::picture::export::encode_png;
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.png"), dir.path().join("b.png"));
+    let mut marked = Picture::filled(4, 4, [100, 100, 100, 255]);
+    marked.set_pixel(1, 1, [100, 100, 200, 255]);
+    std::fs::write(
+        &a,
+        encode_png(&Picture::filled(4, 4, [100, 100, 100, 255])).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(&b, encode_png(&marked).unwrap()).unwrap();
+    let (mut cx, exec) = directwrite_cx();
+    let (handle, view) = open_window(&mut cx, (1400., 760.), move |window, cx| {
+        let view = cx.new(|cx| PictureView::new(a, b, window, cx));
+        window.focus(&view.focus_handle(cx), cx);
+        view
+    });
+    let loaded = view.clone();
+    exec.block_test(cx.wait_for(handle, Duration::from_secs(30), move |_, cx| {
+        !loaded.read(cx).is_busy()
+    }));
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    let toolbar = rows_of(
+        &mut cx,
+        handle,
+        &[
+            "picture-mode",
+            "picture-zoom-fit",
+            "picture-zoom-1",
+            "picture-zoom-out",
+            "picture-zoom-pct",
+            "picture-zoom-in",
+            "picture-prev",
+            "picture-next",
+            "picture-swap",
+            "picture-reload",
+            "picture-export",
+            "picture-tolerance-group",
+        ],
+    );
+    let heads = rows_of(
+        &mut cx,
+        handle,
+        &[
+            "picture-open-left",
+            "picture-left-name",
+            "picture-left-meta",
+            "picture-open-right",
+            "picture-right-name",
+            "picture-right-meta",
+        ],
+    );
+    finish(cx);
+    [toolbar, heads]
+}
+
+#[test]
+fn thai_picture_toolbar_takes_no_more_rows_than_english() {
+    let english = picture_rows();
+    let thai = {
+        let _th = thai_ui();
+        picture_rows()
+    };
+    no_more_rows_in_thai(&english, &thai);
+}
+
+/// The slider's knob hangs 8 px left of its track plus a 3 px hover ring; the label must end
+/// clear of that, so the knob never covers its last letter.
+fn tolerance_label_gap() -> f32 {
+    use duet_app::picture::view::PictureView;
+    use duet_core::picture::Picture;
+    use duet_core::picture::export::encode_png;
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.png"), dir.path().join("b.png"));
+    let png = encode_png(&Picture::filled(4, 4, [100, 100, 100, 255])).unwrap();
+    std::fs::write(&a, &png).unwrap();
+    std::fs::write(&b, &png).unwrap();
+    let (mut cx, exec) = directwrite_cx();
+    let (handle, view) = open_window(&mut cx, (1400., 760.), move |window, cx| {
+        let view = cx.new(|cx| PictureView::new(a, b, window, cx));
+        window.focus(&view.focus_handle(cx), cx);
+        view
+    });
+    let loaded = view.clone();
+    exec.block_test(cx.wait_for(handle, Duration::from_secs(30), move |_, cx| {
+        !loaded.read(cx).is_busy()
+    }));
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    let label = bounds_of(&mut cx, handle, "picture-tolerance-label");
+    let slider = bounds_of(&mut cx, handle, "picture-tolerance");
+    finish(cx);
+    f32::from(slider.left() - label.right())
+}
+
+#[test]
+fn the_thai_tolerance_label_ends_clear_of_the_slider_knob() {
+    let _th = thai_ui();
+    let gap = tolerance_label_gap();
+    assert!(
+        gap >= 11.,
+        "label to slider track is {gap} px, the knob needs 11"
+    );
+}
+
+#[test]
+fn the_english_tolerance_label_ends_clear_of_the_slider_knob() {
+    let gap = tolerance_label_gap();
+    assert!(
+        gap >= 11.,
+        "label to slider track is {gap} px, the knob needs 11"
+    );
+}
+
+/// A long Thai status sentence, the read-only one of the sorted view and then some.
+const LONG_THAI_STATUS: &str = "มุมมองที่เรียงคีย์แล้ว เป็นแบบอ่านอย่างเดียว ปิด “เรียงคีย์” ก่อน จึงจะแก้ได้ และข้อความนี้ยาวต่อไปอีกมากเพื่อให้เกินความกว้างของแถบสถานะแน่นอน";
+
+/// With a long Thai notice at 900 px, the status bar keeps its height, the text is one line
+/// and ends inside the bar.
+fn assert_status_stays_one_line(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    bar: &'static str,
+    text: &'static str,
+    show: impl FnOnce(&mut TestAppContext),
+) {
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    let before = bounds_of(cx, handle, bar);
+    show(cx);
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    let after = bounds_of(cx, handle, bar);
+    let line = bounds_of(cx, handle, text);
+    assert_eq!(before.size.height, after.size.height, "{bar} grew");
+    assert!(
+        line.size.height <= px(17.),
+        "{text} is {:?} tall",
+        line.size.height
+    );
+    assert!(
+        line.left() >= after.left() && line.right() <= after.right(),
+        "{text} {line:?} is outside {after:?}"
+    );
+}
+
+#[test]
+fn a_long_thai_text_status_stays_one_line_in_the_bar_at_900_px() {
+    let _th = thai_ui();
+    let (mut cx, exec) = directwrite_cx();
+    let (_dir, handle, view) = open_text_pair(&mut cx, &exec, 900.);
+    let shown = view.clone();
+    assert_status_stays_one_line(
+        &mut cx,
+        handle,
+        "text-status",
+        "text-status-text",
+        move |cx| {
+            cx.update(|cx| shown.update(cx, |v, cx| v.show_notice(LONG_THAI_STATUS, cx)));
+        },
+    );
+    finish(cx);
+}
+
+#[test]
+fn a_long_thai_table_status_stays_one_line_in_the_bar_at_900_px() {
+    let _th = thai_ui();
+    let (mut cx, exec) = directwrite_cx();
+    let (handle, view) = open_window(&mut cx, (900., 760.), |window, cx| {
+        let view = cx.new(|cx| {
+            TableView::with_text_for_test(
+                "id,v
+1,a
+2,b
+",
+                "id,v
+1,a
+2,c
+",
+                window,
+                cx,
+            )
+        });
+        window.focus(&view.focus_handle(cx), cx);
+        view
+    });
+    let loaded = view.clone();
+    exec.block_test(cx.wait_for(handle, Duration::from_secs(30), move |_, cx| {
+        !loaded.read(cx).is_busy()
+    }));
+    let shown = view.clone();
+    assert_status_stays_one_line(&mut cx, handle, "table-status", "table-notice", move |cx| {
+        cx.update(|cx| {
+            shown.update(cx, |v, cx| {
+                v.show_progress_for_test(LONG_THAI_STATUS);
+                cx.notify();
+            })
+        });
+    });
+    finish(cx);
+}
+
+/// Opened from a folder compare the text view's toolbar also holds Back, and may wrap at
+/// 1400 px; that is accepted, but no control is cut off: each lies inside the toolbar.
+#[test]
+fn the_text_toolbar_with_back_cuts_nothing_off_at_1400_px() {
+    back_toolbar_cuts_nothing_off();
+}
+
+#[test]
+fn the_text_toolbar_with_back_cuts_nothing_off_at_1400_px_in_thai() {
+    let _th = thai_ui();
+    back_toolbar_cuts_nothing_off();
+}
+
+fn back_toolbar_cuts_nothing_off() {
+    let (mut cx, exec) = directwrite_cx();
+    let (_dir, handle, view) = open_text_pair(&mut cx, &exec, 1400.);
+    view.update(&mut cx, |v, cx| v.set_has_origin(true, cx));
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    cx.update_window(handle, |_, window, _| {
+        let bar = window.find("text-toolbar").bounds();
+        for id in [
+            "text-back",
+            "text-swap",
+            "text-reload",
+            "text-format",
+            "text-sort-keys",
+            "text-next",
+            "text-report",
+            "text-save-options",
+            "text-font",
+            "text-find-open",
+            "text-goto-open",
+        ] {
+            let b = window.find(id).bounds();
+            assert!(
+                b.left() >= bar.left()
+                    && b.right() <= bar.right()
+                    && b.top() >= bar.top()
+                    && b.bottom() <= bar.bottom(),
+                "{id} at {b:?} sticks out of the toolbar at {bar:?}"
+            );
+        }
+    })
+    .unwrap();
+    finish(cx);
+}
+
+// ---- The header's mode bar fits, in both languages ----
+
+fn the_mode_bar_fits_at_each_width() {
+    let (mut cx, _fg) = directwrite_cx();
+    for width in [800., 1100., 1400.] {
+        let (handle, _workspace) = open_window(&mut cx, (width, 850.), |window, cx| {
+            cx.new(|cx| {
+                duet_app::workspace::Workspace::new(duet_app::launch::Launch::Start, window, cx)
+            })
+        });
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.render_frame(cx);
+            let right = |b: Bounds<Pixels>| b.origin.x + b.size.width;
+            let brand = window.find("header-brand").bounds();
+            let modes = window.find("header-modes").bounds();
+            assert!(
+                right(brand) <= modes.origin.x,
+                "{width}: brand {brand:?} modes {modes:?}"
+            );
+            let next = window
+                .try_find("header-offline")
+                .unwrap_or_else(|| window.find("header-help"))
+                .bounds();
+            assert!(
+                right(modes) <= next.origin.x,
+                "{width}: modes {modes:?} next {next:?}"
+            );
+            for index in 0..duet_app::tabs::Mode::ALL.len() {
+                let segment = window.find(("header-mode", index)).bounds();
+                assert!(
+                    right(segment) <= right(modes) + px(1.),
+                    "{width}: segment {index} {segment:?} cut in {modes:?}"
+                );
+            }
+        })
+        .unwrap();
+    }
+    finish(cx);
+}
+
+#[test]
+fn the_mode_bar_fits_the_header_in_english() {
+    the_mode_bar_fits_at_each_width();
+}
+
+#[test]
+fn the_mode_bar_fits_the_header_in_thai() {
+    let _thai = thai_ui();
+    the_mode_bar_fits_at_each_width();
+}
+
+// ---- A Thai label stays on one line where it is drawn in a box of its own width ----
+
+struct LabelBox {
+    label: gpui_kit::SharedString,
+    one_line: bool,
+    layout: std::rc::Rc<std::cell::RefCell<Option<gpui_kit::TextLayout>>>,
+}
+
+impl Render for LabelBox {
+    fn render(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        use gpui_kit::{IntoElement as _, ParentElement as _, Styled as _};
+        let theme = gpui_kit::component::Theme::global(cx);
+        window.set_rem_size(theme.font_size);
+        let family = theme.font_family.clone();
+        let text = gpui_kit::StyledText::new(self.label.clone());
+        *self.layout.borrow_mut() = Some(text.layout().clone());
+        // As a kit menu row lays out its label: a flex child with no width of its own.
+        let label = if self.one_line {
+            duet_app::ui::menu::one_line(text).into_any_element()
+        } else {
+            text.into_any_element()
+        };
+        gpui_kit::div()
+            .absolute()
+            .w(px(500.))
+            .font_family(family)
+            .text_sm()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .child(label)
+    }
+}
+
+/// Which of `labels` draw on more than one line, at each display scale.
+fn wrapped_labels(labels: &[&'static str], one_line: bool) -> Vec<(f32, &'static str)> {
+    let (mut cx, _fg) = directwrite_cx();
+    let layout = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let shared = layout.clone();
+    let (handle, view) = open_window(&mut cx, (1400., 850.), move |_, cx| {
+        cx.new(|_| LabelBox {
+            label: "x".into(),
+            one_line,
+            layout: shared,
+        })
+    });
+    let mut wrapped = Vec::new();
+    for scale in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
+        for label in labels {
+            let wraps = cx
+                .update_window(handle, |_, window, cx| {
+                    window.set_scale_factor(scale);
+                    view.update(cx, |v, cx| {
+                        v.label = (*label).into();
+                        cx.notify();
+                    });
+                    window.render_frame(cx);
+                    window.render_frame(cx);
+                    let drawn: Option<gpui_kit::TextLayout> = layout.borrow().clone();
+                    drawn.expect("drawn").wrapped_text().contains('\n')
+                })
+                .unwrap();
+            if wraps {
+                wrapped.push((scale, *label));
+            }
+        }
+    }
+    finish(cx);
+    wrapped
+}
+
+#[test]
+fn a_bare_thai_label_can_wrap_and_one_line_stops_it() {
+    let _thai = thai_ui();
+    let labels: Vec<&'static str> = duet_app::i18n::th::table()
+        .iter()
+        .filter(|(_, thai)| thai.chars().count() <= 45 && !thai.contains('{'))
+        .map(|(_, thai)| *thai)
+        .collect();
+    let bare = wrapped_labels(&labels, false);
+    assert!(
+        bare.iter().any(|(_, label)| *label == "ยุบโฟลเดอร์"),
+        "the case this guards: gpui wraps it in a box of its own width. If this now passes, \
+         gpui changed and `ui::menu::row` may be simpler: {bare:?}"
+    );
+    let held = wrapped_labels(&labels, true);
+    assert!(held.is_empty(), "{held:?}");
+}
+
+#[test]
+fn a_thai_tooltip_does_not_shrink_to_its_narrowest_piece() {
+    use gpui_kit::{InteractiveElement as _, StatefulInteractiveElement as _};
+    let _thai = thai_ui();
+    let (mut cx, _fg) = directwrite_cx();
+    struct Tip;
+    impl Render for Tip {
+        fn render(
+            &mut self,
+            _: &mut Window,
+            _: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            use gpui_kit::{Styled as _, TestSupportExt as _};
+            gpui_kit::div()
+                .id("tip-target")
+                .test_support()
+                .size(px(100.))
+                .tooltip(|window, cx| {
+                    duet_app::ui::style::ld_tip(
+                        "1.0 = 1, 1,000 = 1000, 1e3 = 1000".into(),
+                        window,
+                        cx,
+                    )
+                })
+        }
+    }
+    let (handle, _view) = open_window(&mut cx, (1400., 850.), |_, cx| cx.new(|_| Tip));
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover("tip-target", cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_secs(2));
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+        let tip = window.find("tooltip-text").bounds();
+        assert!(tip.size.width >= px(180.), "one word a line: {tip:?}");
+        assert!(tip.size.height <= px(44.), "at most two lines: {tip:?}");
+    })
+    .unwrap();
     finish(cx);
 }

@@ -9,6 +9,7 @@ use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::{AnyElement, ClickEvent, Entity, Subscription, Task, Window, div};
 
 use super::*;
+use crate::i18n::{tr, tr_key};
 use crate::pathbar::path_input;
 use crate::picture::prefs::Mode;
 use crate::picture::zoom::zoom_label;
@@ -25,6 +26,8 @@ const LAZY_OVERLAP: u64 = 2_000_000;
 /// The slider gives each of the 256 tolerances a pixel of its own, so a drag reaches any one
 /// exactly (I-40).
 const SLIDER_WIDTH: f32 = 256.;
+/// Extra gap before the slider so its knob never covers the label.
+const KNOB_CLEARANCE: f32 = 8.;
 /// The number box: its step buttons and room for "255" between them (I-40).
 const BOX_WIDTH: f32 = 96.;
 
@@ -32,22 +35,24 @@ const MODE_TIPS: [(Mode, &str, &str); 4] = [
     (
         Mode::SideBySide,
         "picture-mode-side",
-        "Both pictures side by side: they pan and zoom together (1)",
+        tr_key("Both pictures side by side: they pan and zoom together (1)"),
     ),
     (
         Mode::Difference,
         "picture-mode-diff",
-        "Difference image: differing pixels in red on a dimmed copy of the left picture (2)",
+        tr_key(
+            "Difference image: differing pixels in red on a dimmed copy of the left picture (2)",
+        ),
     ),
     (
         Mode::Slider,
         "picture-mode-slider",
-        "One over the other: drag the divider to compare left and right (3)",
+        tr_key("One over the other: drag the divider to compare left and right (3)"),
     ),
     (
         Mode::Blink,
         "picture-mode-blink",
-        "Show the left and right picture in turn every 0.6 seconds (4)",
+        tr_key("Show the left and right picture in turn every 0.6 seconds (4)"),
     ),
 ];
 
@@ -313,12 +318,12 @@ impl PictureView {
         let segments = MODE_TIPS.map(|(this_mode, id, tip)| {
             ld_segment(
                 id,
-                this_mode.label(),
+                tr(this_mode.label()),
                 mode == this_mode,
                 this_mode == Mode::Blink,
                 p,
             )
-            .ld_tooltip(tip)
+            .ld_tooltip(tr(tip))
             .ld_click(
                 true,
                 cx.listener(move |this, _, _, cx| this.set_mode(this_mode, cx)),
@@ -343,14 +348,14 @@ impl PictureView {
             .child(ld_segmented("picture-mode", segments, p))
             .child(ld_separator(p))
             .child(
-                ld_button("picture-zoom-fit", "Fit", p)
-                    .ld_tooltip("Fit to the window (Ctrl+0)")
+                ld_button("picture-zoom-fit", tr("Fit"), p)
+                    .ld_tooltip(tr("Fit to the window (Ctrl+0)"))
                     .ld_on(fit, p)
                     .ld_click(true, cx.listener(|this, _, _, cx| this.fit(cx))),
             )
             .child(
                 ld_button("picture-zoom-1", "1:1", p)
-                    .ld_tooltip("Actual size, 100% (Ctrl+1)")
+                    .ld_tooltip(tr("Actual size, 100% (Ctrl+1)"))
                     .ld_on(actual, p)
                     .ld_click(
                         true,
@@ -361,7 +366,7 @@ impl PictureView {
                 ld_icon_button(
                     "picture-zoom-out",
                     icons::ZOOM_OUT,
-                    "Zoom out (Ctrl+− or Ctrl+wheel)",
+                    tr("Zoom out (Ctrl+− or Ctrl+wheel)"),
                     p,
                 )
                 .ld_click(
@@ -386,7 +391,7 @@ impl PictureView {
                 ld_icon_button(
                     "picture-zoom-in",
                     icons::ZOOM_IN,
-                    "Zoom in (Ctrl++ or Ctrl+wheel)",
+                    tr("Zoom in (Ctrl++ or Ctrl+wheel)"),
                     p,
                 )
                 .ld_click(true, cx.listener(|this, _, _, cx| this.step_zoom(true, cx))),
@@ -398,7 +403,7 @@ impl PictureView {
                 ld_icon_button(
                     "picture-prev",
                     icons::PREV,
-                    "Previous difference group (F7)",
+                    tr("Previous difference group (F7)"),
                     p,
                 )
                 .ld_click(
@@ -407,25 +412,35 @@ impl PictureView {
                 ),
             )
             .child(
-                ld_icon_button("picture-next", icons::NEXT, "Next difference group (F8)", p)
-                    .ld_click(
-                        can_navigate,
-                        cx.listener(|this, _, _, cx| this.go(true, cx)),
-                    ),
+                ld_icon_button(
+                    "picture-next",
+                    icons::NEXT,
+                    tr("Next difference group (F8)"),
+                    p,
+                )
+                .ld_click(
+                    can_navigate,
+                    cx.listener(|this, _, _, cx| this.go(true, cx)),
+                ),
             )
             .child(ld_separator(p))
             .child(
-                ld_icon_button("picture-swap", icons::SWAP, "Swap left and right (F9)", p)
-                    .ld_click(
-                        self.can_swap(),
-                        cx.listener(|this, _, _, cx| this.swap_sides(cx)),
-                    ),
+                ld_icon_button(
+                    "picture-swap",
+                    icons::SWAP,
+                    tr("Swap left and right (F9)"),
+                    p,
+                )
+                .ld_click(
+                    self.can_swap(),
+                    cx.listener(|this, _, _, cx| this.swap_sides(cx)),
+                ),
             )
             .child(
                 ld_icon_button(
                     "picture-reload",
                     icons::RELOAD,
-                    "Read both pictures from disk again (F5)",
+                    tr("Read both pictures from disk again (F5)"),
                     p,
                 )
                 .ld_click(
@@ -434,8 +449,8 @@ impl PictureView {
                 ),
             )
             .child(
-                ld_button("picture-export", "Export difference image", p)
-                    .ld_tooltip("Save the difference image as a PNG file")
+                ld_button("picture-export", tr("Export difference image"), p)
+                    .ld_tooltip(tr("Save the difference image as a PNG file"))
                     .ld_click(
                         self.can_export(),
                         cx.listener(|this, _, window, cx| this.export(window, cx)),
@@ -446,20 +461,31 @@ impl PictureView {
 
     /// "Tolerance", the slider and the number box.
     fn render_tolerance(&self, p: &Palette, fonts: &Fonts) -> impl IntoElement {
-        const TIP: &str = "Pixels whose every channel (R, G, B, A) differs by this much or less count as the same";
+        const TIP: &str = tr_key(
+            "Pixels whose every channel (R, G, B, A) differs by this much or less count as the same",
+        );
         h_flex()
             .id("picture-tolerance-group")
             .test_support()
             .flex_none()
             .items_center()
             .gap(px(6.))
-            .tooltip(|window, cx| ld_tip(TIP.into(), window, cx))
-            .child(div().flex_none().text_color(p.muted).child("Tolerance"))
+            .tooltip(|window, cx| ld_tip(tr(TIP).into(), window, cx))
+            .child(
+                div()
+                    .id("picture-tolerance-label")
+                    .test_support()
+                    .flex_none()
+                    .text_color(p.muted)
+                    .child(tr("Tolerance")),
+            )
             .child(
                 div()
                     .id("picture-tolerance")
                     .test_support()
                     .flex_none()
+                    // The knob hangs 8 px left of the track (3 px more with its hover ring).
+                    .ml(px(KNOB_CLEARANCE))
                     .w(px(SLIDER_WIDTH))
                     .child(Slider::new(&self.tolerance.slider).w_full()),
             )
@@ -504,16 +530,16 @@ impl PictureView {
         let (open_id, open_label, open_tip, name_id, meta_id) = if left {
             (
                 "picture-open-left",
-                "Open left…",
-                "Choose the left picture (Ctrl+O)",
+                tr("Open left…"),
+                tr("Choose the left picture (Ctrl+O)"),
                 "picture-left-name",
                 "picture-left-meta",
             )
         } else {
             (
                 "picture-open-right",
-                "Open right…",
-                "Choose the right picture (Ctrl+Shift+O)",
+                tr("Open right…"),
+                tr("Choose the right picture (Ctrl+Shift+O)"),
                 "picture-right-name",
                 "picture-right-meta",
             )
@@ -605,7 +631,7 @@ impl PictureView {
             .child(if named {
                 name
             } else {
-                "No picture chosen".to_owned()
+                tr("No picture chosen").to_owned()
             });
         match self.name_tooltip(left) {
             Some(tip) => label

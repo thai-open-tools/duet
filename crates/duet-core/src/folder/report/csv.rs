@@ -4,35 +4,36 @@
 use chrono::NaiveDateTime;
 
 use super::lines::{LineDetails, LineInfo};
-use super::{ItemState, ReportItem, attention, sort_items, unimportant_reason};
+use super::{ItemState, ReportItem, attention, moved_note, sort_items, unimportant_reason};
 use crate::folder::tree::Side;
+use crate::i18n::{tr, trf};
 use crate::table::report::csv_cell;
 
 /// The 21 column titles; `names` are the two sides.
 pub fn csv_columns(names: &[String; 2]) -> [String; 21] {
     let [a, b] = names;
     [
-        "No.".to_owned(),
-        "Folder".to_owned(),
-        "File name".to_owned(),
-        "Type".to_owned(),
-        "Status".to_owned(),
-        "Needs a look".to_owned(),
-        "Changed (lines)".to_owned(),
-        format!("Only in {a} (lines)"),
-        format!("Only in {b} (lines)"),
-        "Places".to_owned(),
-        "Note".to_owned(),
-        "Modified later".to_owned(),
-        format!("Size {a} (bytes)"),
-        format!("Size {b} (bytes)"),
-        format!("Modified {a}"),
-        format!("Modified {b}"),
-        format!("Path {a}"),
-        format!("Path {b}"),
-        "Reviewer".to_owned(),
-        "Result".to_owned(),
-        "Reviewer note".to_owned(),
+        tr("No.").to_owned(),
+        tr("Folder").to_owned(),
+        tr("File name").to_owned(),
+        tr("Type").to_owned(),
+        tr("Status").to_owned(),
+        tr("Needs a look").to_owned(),
+        tr("Changed (lines)").to_owned(),
+        trf("Only in {} (lines)", &[a]),
+        trf("Only in {} (lines)", &[b]),
+        tr("Places").to_owned(),
+        tr("Note").to_owned(),
+        tr("Modified later").to_owned(),
+        trf("Size {} (bytes)", &[a]),
+        trf("Size {} (bytes)", &[b]),
+        trf("Modified {}", &[a]),
+        trf("Modified {}", &[b]),
+        trf("Path {}", &[a]),
+        trf("Path {}", &[b]),
+        tr("Reviewer").to_owned(),
+        tr("Result").to_owned(),
+        tr("Reviewer note").to_owned(),
     ]
 }
 
@@ -155,25 +156,23 @@ pub fn row_data(
     if item.format_only()
         && let Some([a, b]) = item.note.as_ref().and_then(|note| note.formats)
     {
-        notes.push(format!(
+        notes.push(trf(
             "Every line matches; only the file format differs \u{2014} {}: {} / {}: {}",
-            names[0],
-            a.describe(),
-            names[1],
-            b.describe()
+            &[&names[0], &a.describe(), &names[1], &b.describe()],
         ));
     }
     if item.case_only() {
-        notes.push("Same contents; the names differ only in case".to_owned());
+        notes.push(tr("Same contents; the names differ only in case").to_owned());
     }
+    notes.extend(moved_note(item, names));
     if item.state == ItemState::Same && item.newer.is_some() && !item.unimportant() {
-        notes.push("Same contents but different modified times".to_owned());
+        notes.push(tr("Same contents but different modified times").to_owned());
     }
     let line_note = info.and_then(|info| info.note.clone());
     if let Some(note) = &line_note {
         notes.push(note.clone());
     } else if info.is_some_and(|info| !info.counted) {
-        notes.push("Contents not read".to_owned());
+        notes.push(tr("Contents not read").to_owned());
     }
     let base = item.rel.rsplit('/').next().unwrap_or(&item.rel);
     let ext = match base.rfind('.') {
@@ -183,12 +182,12 @@ pub fn row_data(
     let folder = item
         .rel
         .rfind('/')
-        .map_or("(top level)", |at| &item.rel[..at]);
+        .map_or(tr("(top level)"), |at| &item.rel[..at]);
     let state = match item.state {
-        ItemState::Different => "Different".to_owned(),
-        ItemState::LeftOnly => format!("Only in {}", names[0]),
-        ItemState::RightOnly => format!("Only in {}", names[1]),
-        ItemState::Same => "Same".to_owned(),
+        ItemState::Different => tr("Different").to_owned(),
+        ItemState::LeftOnly => trf("Only in {}", &[&names[0]]),
+        ItemState::RightOnly => trf("Only in {}", &[&names[1]]),
+        ItemState::Same => tr("Same").to_owned(),
     };
     let path = |side: &Option<super::SideFacts>| {
         side.as_ref()

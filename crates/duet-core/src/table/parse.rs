@@ -254,6 +254,7 @@ fn run(
         lines,
         end_lines,
         width,
+        text_marked: false,
     })
 }
 

@@ -4,28 +4,54 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use duet_core::text::buffer::TextBuffer;
-use duet_core::text::document::FileStamp;
+use duet_core::text::document::{FileStamp, ReadOnlyReason};
 use duet_core::text::encoding::{EncodeError, TextEncoding};
 use duet_core::text::lines::EolStyle;
 use duet_core::text::save::{SaveError, SaveRequest, same_file, save};
 use encoding_rs::UTF_8;
 use gpui_kit::{
-    AsyncWindowContext, BackgroundExecutor, Context, PromptLevel, Task, WeakEntity, Window,
+    AsyncWindowContext, BackgroundExecutor, Context, PromptLevel, SharedString, Task, WeakEntity,
+    Window,
 };
 
+use crate::i18n::errors::save_error;
+use crate::i18n::{answers, tr, tr_key, trf};
 use crate::text::editing::WAIT_NOTICE;
 use crate::text::view::{TextEvent, TextView};
 
-pub const UNSAVED_ANSWERS: [&str; 3] = ["Save", "Discard", "Cancel"];
-pub const CONFLICT_ANSWERS: [&str; 2] = ["Cancel", "Overwrite"];
+/// Why a write was refused: the notice, and whether it is the "Still saving {}." one. The flag
+/// travels with the text, so nothing reads the displayed sentence back.
+pub(crate) struct Refusal {
+    text: String,
+    still_saving: bool,
+}
+
+impl From<String> for Refusal {
+    fn from(text: String) -> Self {
+        Self {
+            text,
+            still_saving: false,
+        }
+    }
+}
+
+fn still_saving(path: &Path) -> Refusal {
+    Refusal {
+        text: trf("Still saving {}.", &[&file_name(path)]),
+        still_saving: true,
+    }
+}
+
+pub const UNSAVED_ANSWERS: [&str; 3] = [tr_key("Save"), tr_key("Discard"), tr_key("Cancel")];
+pub const CONFLICT_ANSWERS: [&str; 2] = [tr_key("Cancel"), tr_key("Overwrite")];
 /// What a character the target encoding cannot hold offers (R14).
-pub const ENCODE_ANSWERS: [&str; 2] = ["Save as UTF-8", "Cancel"];
+pub const ENCODE_ANSWERS: [&str; 2] = [tr_key("Save as UTF-8"), tr_key("Cancel")];
 
 /// What a write came to: the stamp of the file and the encoding it was written in, or the
 /// notice that says why not.
-type Written = Result<(FileStamp, TextEncoding), String>;
+type Written = Result<(FileStamp, TextEncoding), Refusal>;
 /// What the first, background attempt of a write returned: the save's own result, or a refusal.
-type Attempt = Result<Result<FileStamp, SaveError>, String>;
+type Attempt = Result<Result<FileStamp, SaveError>, Refusal>;
 
 /// One side's save, ready to run off the UI thread.
 struct Job {
@@ -55,10 +81,14 @@ fn file_name(path: &Path) -> String {
 
 fn failure_notice(err: &SaveError) -> String {
     match err {
-        SaveError::Encode(EncodeError::Unrepresentable { encoding, .. }) => format!(
-            "Can't save: the text has a character {encoding} can't hold. The file was not changed."
+        SaveError::Encode(EncodeError::Unrepresentable { encoding, .. }) => trf(
+            "Can't save: the text has a character {} can't hold. The file was not changed.",
+            &[encoding],
         ),
-        other => format!("Can't save: {other}. The file was not changed."),
+        other => trf(
+            "Can't save: {}. The file was not changed.",
+            &[&save_error(other)],
+        ),
     }
 }
 
@@ -89,9 +119,11 @@ async fn write_job(
                 let answer = this.update_in(cx, |_, window, cx| {
                     window.prompt(
                         PromptLevel::Warning,
-                        &format!("{name} changed on disk since it was opened."),
-                        Some("Overwrite it with your edits, or cancel and keep editing?"),
-                        &CONFLICT_ANSWERS,
+                        &trf("{} changed on disk since it was opened.", &[&name]),
+                        Some(tr(
+                            "Overwrite it with your edits, or cancel and keep editing?",
+                        )),
+                        &answers(&CONFLICT_ANSWERS),
                         cx,
                     )
                 });
@@ -105,22 +137,25 @@ async fn write_job(
                 if !offered =>
             {
                 let file = file_name(&job.path);
-                let detail = format!(
-                    "It has a character {name} can't hold. Save it as UTF-8 instead? The file's encoding changes."
+                let detail = trf(
+                    "It has a character {} can't hold. Save it as UTF-8 instead? The file's encoding changes.",
+                    &[&name],
                 );
                 let answer = this.update_in(cx, |_, window, cx| {
                     window.prompt(
                         PromptLevel::Warning,
-                        &format!("{file} can't be saved as {name}."),
+                        &trf("{} can't be saved as {}.", &[&file, &name]),
                         Some(&detail),
-                        &ENCODE_ANSWERS,
+                        &answers(&ENCODE_ANSWERS),
                         cx,
                     )
                 });
                 if !matches!(answer.ok()?.await, Ok(0)) {
-                    return Some(Err(format!(
-                        "Not saved: {file} has a character {name} can't hold."
-                    )));
+                    return Some(Err(trf(
+                        "Not saved: {} has a character {} can't hold.",
+                        &[&file, &name],
+                    )
+                    .into()));
                 }
                 offered = true;
                 encoding = TextEncoding {
@@ -129,12 +164,24 @@ async fn write_job(
                 };
                 outcome = rerun(encoding, check).await;
             }
-            Ok(Err(other)) => return Some(Err(failure_notice(&other))),
+            Ok(Err(other)) => return Some(Err(failure_notice(&other).into())),
         }
     }
 }
 
 impl TextView {
+    /// Shows a refusal as the notice, remembering whether it is the "Still saving" one.
+    fn refuse(&mut self, refusal: Refusal) {
+        let text: SharedString = refusal.text.into();
+        self.still_saving_notice = refusal.still_saving.then(|| text.clone());
+        self.notice = Some(text);
+    }
+
+    /// The notice on show is the "Still saving" refusal, not something that replaced it.
+    fn showing_still_saving(&self) -> bool {
+        self.still_saving_notice.is_some() && self.notice == self.still_saving_notice
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.model.as_ref().is_some_and(|m| m.any_dirty())
     }
@@ -209,7 +256,7 @@ impl TextView {
         // Only the spelling is compared here; resolving names touches the disk (a UNC path can be
         // slow), so a different spelling of a running save's file is refused by the job.
         if self.saving.iter().any(|saving| saving == path) {
-            self.notice = Some(format!("Still saving {}.", file_name(path)).into());
+            self.refuse(still_saving(path));
             cx.notify();
             return Task::ready(false);
         }
@@ -231,7 +278,7 @@ impl TextView {
                 background
                     .spawn(async move {
                         if busy.iter().any(|s| same_file(s, &job.path)) {
-                            return Err(format!("Still saving {}.", file_name(&job.path)));
+                            return Err(still_saving(&job.path));
                         }
                         Ok(run(&job, job.encoding, true))
                     })
@@ -256,18 +303,14 @@ impl TextView {
                         }
                         view.watch.saved(left);
                         // A refusal that landed first (a differently spelled save) stays.
-                        if !view
-                            .notice
-                            .as_ref()
-                            .is_some_and(|n| n.starts_with("Still saving"))
-                        {
+                        if !view.showing_still_saving() {
                             view.notice = None;
                         }
                         cx.notify();
                         true
                     }
-                    Some(Err(notice)) => {
-                        view.notice = Some(notice.into());
+                    Some(Err(refusal)) => {
+                        view.refuse(refusal);
                         cx.notify();
                         false
                     }
@@ -302,6 +345,25 @@ impl TextView {
         })
     }
 
+    /// Save As of a sorted or formatted view would write the changed text over a file (or into a
+    /// new one) as if it were the file's own: say so and write nothing. True when refused.
+    pub(crate) fn refuse_save_as_of_view(&mut self, left: bool, cx: &mut Context<Self>) -> bool {
+        let Some(reason) = self.model.as_ref().and_then(|m| m.derived_view(left)) else {
+            return false;
+        };
+        self.notice = Some(
+            match reason {
+                ReadOnlyReason::Sorted => {
+                    tr("The sorted view can't be saved as a new file. Turn Sort keys off first.")
+                }
+                _ => tr("The formatted view can't be saved as a new file. Turn Format off first."),
+            }
+            .into(),
+        );
+        cx.notify();
+        true
+    }
+
     /// Save As (rule R9): writes the side's text to `path` in its encoding and line endings,
     /// without a disk-stamp check (the dialog asked about overwriting), and the side then
     /// refers to `path`; the workspace re-keys the tab on `Renamed`. Undo history is kept.
@@ -313,11 +375,14 @@ impl TextView {
         cx: &mut Context<Self>,
     ) -> Task<bool> {
         if self.job.is_running() {
-            self.notice = Some(WAIT_NOTICE.into());
+            self.notice = Some(tr(WAIT_NOTICE).into());
             cx.notify();
             return Task::ready(false);
         }
         self.pull_shared(cx);
+        if self.refuse_save_as_of_view(left, cx) {
+            return Task::ready(false);
+        }
         let Some(model) = self.model.as_ref() else {
             return Task::ready(false);
         };
@@ -327,7 +392,7 @@ impl TextView {
             .to_path_buf();
         if model.buffer(left).is_none() && doc.is_lossy() {
             self.notice = Some(
-                "This file did not decode cleanly, so it can't be saved as a new file.".into(),
+                tr("This file did not decode cleanly, so it can't be saved as a new file.").into(),
             );
             cx.notify();
             return Task::ready(false);
@@ -337,8 +402,9 @@ impl TextView {
             (Some(buffer), _) => (buffer.text().to_owned(), Some(buffer.version())),
             (None, Some(text)) => (text.to_owned(), None),
             (None, None) => {
-                self.notice =
-                    Some("This file is over 64 MiB, so it can't be saved as a new file.".into());
+                self.notice = Some(
+                    tr("This file is over 64 MiB, so it can't be saved as a new file.").into(),
+                );
                 cx.notify();
                 return Task::ready(false);
             }
@@ -366,14 +432,17 @@ impl TextView {
                 background
                     .spawn(async move {
                         if !other_path.as_os_str().is_empty() && same_file(&job.path, &other_path) {
-                            return Err("That file is open on the other side. Pick another name."
-                                .to_owned());
+                            return Err(tr(
+                                "That file is open on the other side. Pick another name.",
+                            )
+                            .to_owned()
+                            .into());
                         }
                         if let Some(in_flight) = [job.path.as_path(), origin.as_path()]
                             .into_iter()
                             .find(|p| busy.iter().any(|s| same_file(s, p)))
                         {
-                            return Err(format!("Still saving {}.", file_name(in_flight)));
+                            return Err(still_saving(in_flight));
                         }
                         Ok(run(&job, job.encoding, false))
                     })
@@ -395,9 +464,9 @@ impl TextView {
                         // but this side is no longer the one that was saved.
                         if *(if left { &request.left } else { &request.right }) != origin {
                             view.notice = Some(
-                                format!(
+                                trf(
                                     "Saved {}, but this side now shows another file.",
-                                    file_name(&job.path)
+                                    &[&file_name(&job.path)],
                                 )
                                 .into(),
                             );
@@ -413,27 +482,23 @@ impl TextView {
                             view.read_as_written(left, &job.path, before, encoding);
                         }
                         view.watch.saved(left);
+                        // A refusal that landed first (another save of the same file) stays.
+                        if !view.showing_still_saving() {
+                            view.notice = None;
+                        }
                         let request = &mut view.request;
                         if left {
                             request.left = job.path.clone();
                         } else {
                             request.right = job.path.clone();
                         }
-                        // A refusal that landed first (another save of the same file) stays.
-                        if !view
-                            .notice
-                            .as_ref()
-                            .is_some_and(|n| n.starts_with("Still saving"))
-                        {
-                            view.notice = None;
-                        }
                         let (left, right) = (request.left.clone(), request.right.clone());
                         cx.emit(TextEvent::Renamed { left, right });
                         cx.notify();
                         true
                     }
-                    Err(notice) => {
-                        view.notice = Some(notice.into());
+                    Err(refusal) => {
+                        view.refuse(refusal);
                         cx.notify();
                         false
                     }
@@ -449,8 +514,9 @@ impl TextView {
     /// one side still saves that side.
     pub fn save_all(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Task<bool> {
         if self.same_file_with_different_edits() {
-            self.notice =
-                Some("Both sides are the same file with different edits. Save one side.".into());
+            self.notice = Some(
+                tr("Both sides are the same file with different edits. Save one side.").into(),
+            );
             cx.notify();
             return Task::ready(false);
         }
@@ -529,9 +595,9 @@ impl TextView {
         let names = self.dirty_names();
         let answer = window.prompt(
             PromptLevel::Warning,
-            &format!("Save changes to {names}?"),
-            Some("Your edits are lost if you don't save them."),
-            &UNSAVED_ANSWERS,
+            &trf("Save changes to {}?", &[&names]),
+            Some(tr("Your edits are lost if you don't save them.")),
+            &answers(&UNSAVED_ANSWERS),
             cx,
         );
         cx.spawn_in(window, async move |this, cx| match answer.await {
@@ -552,15 +618,15 @@ impl TextView {
             let doc = if left { model.left() } else { model.right() };
             match doc.path().file_name() {
                 Some(name) => name.to_string_lossy().into_owned(),
-                None if doc.path().as_os_str().is_empty() => "untitled".to_owned(),
+                None if doc.path().as_os_str().is_empty() => tr("untitled").to_owned(),
                 None => String::new(),
             }
         };
         match (model.is_dirty(true), model.is_dirty(false)) {
             (true, true) if self.is_untitled(true) && self.is_untitled(false) => {
-                "both untitled sides".to_owned()
+                tr("both untitled sides").to_owned()
             }
-            (true, true) => format!("{} and {}", name(true), name(false)),
+            (true, true) => trf("{} and {}", &[&name(true), &name(false)]),
             (true, false) => name(true),
             _ => name(false),
         }

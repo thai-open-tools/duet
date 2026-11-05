@@ -15,6 +15,7 @@ use crate::folder::entry::{Entry, EntryKind, join_rel};
 use crate::folder::odd_scan::OddMarks;
 use crate::folder::run::{CompareMode, FolderTextRules};
 use crate::folder::tree::{FolderComparison, Node, Side, Status, newer_side};
+use crate::i18n::{Lang, scoped_lang, tr, tr_key, trf};
 use crate::text::diff::WhitespaceMode;
 use crate::text::lines::EolStyle;
 
@@ -66,6 +67,22 @@ pub struct ReportItem {
     pub odd_text: [bool; 2],
     /// The outermost folder above it that exists on its side only.
     pub whole_folder: Option<String>,
+    /// For a one-sided file with a moved or renamed twin: the twin's `rel` on the other side.
+    pub moved_to: Option<String>,
+}
+
+/// The note of a one-sided file that is also on the other side under another path.
+pub fn moved_note(item: &ReportItem, names: &[String; 2]) -> Option<String> {
+    let other = match item.state {
+        ItemState::LeftOnly => &names[1],
+        ItemState::RightOnly => &names[0],
+        _ => return None,
+    };
+    let rel = item.moved_to.as_ref()?;
+    Some(trf(
+        "Same contents as {} in {} (moved or renamed)",
+        &[rel, other],
+    ))
 }
 
 impl ReportItem {
@@ -150,7 +167,7 @@ pub fn report_items(
                 Status::Pending => (
                     ItemState::Different,
                     None,
-                    Some("Not compared yet.".to_owned()),
+                    Some(tr("Not compared yet.").to_owned()),
                     false,
                 ),
                 Status::Error(message) => {
@@ -187,6 +204,10 @@ pub fn report_items(
                 similar,
                 odd_text,
                 whole_folder,
+                moved_to: cmp
+                    .moved_partner(index)
+                    .and_then(|other| cmp.nodes.get(other as usize))
+                    .map(|other| other.rel.clone()),
             })
         })
         .collect()
@@ -312,34 +333,36 @@ impl Attention {
 
     pub fn title(self) -> &'static str {
         match self {
-            Attention::Script => "Linux scripts with CRLF or a BOM",
-            Attention::Encoding => "Encodings differ",
-            Attention::OddSpace => "Differs only in the kind of whitespace or invisible characters",
-            Attention::Invisible => "Invisible characters in the text or values",
-            Attention::CaseOnly => "File names that differ only in case",
-            Attention::Unreadable => "Files that could not be read",
+            Attention::Script => tr("Linux scripts with CRLF or a BOM"),
+            Attention::Encoding => tr("Encodings differ"),
+            Attention::OddSpace => {
+                tr("Differs only in the kind of whitespace or invisible characters")
+            }
+            Attention::Invisible => tr("Invisible characters in the text or values"),
+            Attention::CaseOnly => tr("File names that differ only in case"),
+            Attention::Unreadable => tr("Files that could not be read"),
         }
     }
 
     pub fn help(self) -> &'static str {
         match self {
-            Attention::Script => {
-                "They may not run on Linux (for example \"/bin/bash^M: bad interpreter\"). Convert them to LF without a BOM."
-            }
-            Attention::Encoding => {
-                "The text matches but the encodings differ: a program that reads it may show Thai wrongly."
-            }
-            Attention::OddSpace => {
-                "They look the same but the values differ (for example NBSP for a space, LRM, zero-width): this often breaks a config value without anyone noticing."
-            }
-            Attention::Invisible => {
-                "They may change a value without anyone noticing. Open the file in duet and use the button in the status bar to visit each one."
-            }
-            Attention::CaseOnly => {
-                "On Windows they are one file, on Linux two: a program that uses the old name may not find it."
-            }
+            Attention::Script => tr(
+                "They may not run on Linux (for example \"/bin/bash^M: bad interpreter\"). Convert them to LF without a BOM.",
+            ),
+            Attention::Encoding => tr(
+                "The text matches but the encodings differ: a program that reads it may show Thai wrongly.",
+            ),
+            Attention::OddSpace => tr(
+                "They look the same but the values differ (for example NBSP for a space, LRM, zero-width): this often breaks a config value without anyone noticing.",
+            ),
+            Attention::Invisible => tr(
+                "They may change a value without anyone noticing. Open the file in duet and use the button in the status bar to visit each one.",
+            ),
+            Attention::CaseOnly => tr(
+                "On Windows they are one file, on Linux two: a program that uses the old name may not find it.",
+            ),
             Attention::Unreadable => {
-                "No permission, or the file is locked: the contents were not compared."
+                tr("No permission, or the file is locked: the contents were not compared.")
             }
         }
     }
@@ -404,27 +427,32 @@ pub fn unimportant_reason(item: &ReportItem) -> Option<String> {
     {
         let mut parts = Vec::new();
         if a.eol != b.eol {
-            parts.push(format!("EOL {} / {}", eol_label(a.eol), eol_label(b.eol)));
+            parts.push(trf("EOL {} / {}", &[&eol_label(a.eol), &eol_label(b.eol)]));
         }
         if a.final_newline != b.final_newline {
-            parts.push("final newline".to_owned());
+            parts.push(tr("final newline").to_owned());
         }
         if a.bom != b.bom {
-            parts.push("BOM".to_owned());
+            parts.push(tr("BOM").to_owned());
         }
         let what = if parts.is_empty() {
             String::new()
         } else {
             format!(" ({})", parts.join(", "))
         };
-        return Some(format!(
-            "Only the file format differs{what} — every line matches"
+        return Some(trf(
+            "Only the file format differs{} — every line matches",
+            &[&what],
         ));
     }
     let format = note.is_some_and(|n| n.format_differs());
-    Some(format!(
+    Some(trf(
         "Differs only in unimportant parts by the text compare rules{}",
-        if format { " and the file format" } else { "" }
+        &[&if format {
+            tr(" and the file format")
+        } else {
+            ""
+        }],
     ))
 }
 
@@ -433,8 +461,8 @@ fn eol_label(eol: EolStyle) -> &'static str {
         EolStyle::CrLf => "CRLF",
         EolStyle::Lf => "LF",
         EolStyle::Cr => "CR",
-        EolStyle::Mixed => "mixed",
-        EolStyle::None => "none",
+        EolStyle::Mixed => tr("mixed"),
+        EolStyle::None => tr("none"),
     }
 }
 
@@ -461,7 +489,7 @@ pub fn default_names(left_root: &Path, right_root: &Path) -> [String; 2] {
     if !a2.is_empty() && !b2.is_empty() && a2 != b2 {
         [format!("{a2}/{a}"), format!("{b2}/{b}")]
     } else {
-        [format!("{a} (left)"), format!("{b} (right)")]
+        [trf("{} (left)", &[&a]), trf("{} (right)", &[&b])]
     }
 }
 
@@ -508,7 +536,7 @@ pub fn percent(n: usize, total: usize) -> String {
 }
 
 /// A count and its noun, with thousands separators (the app's `format::count_of`).
-pub fn count_text(n: u64, one: &str, many: &str) -> String {
+pub fn count_text(n: u64, one: &str, many: &'static str) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3 + 8);
     for (i, c) in digits.chars().enumerate() {
@@ -518,7 +546,12 @@ pub fn count_text(n: u64, one: &str, many: &str) -> String {
         out.push(c);
     }
     out.push(' ');
-    out.push_str(if n == 1 { one } else { many });
+    // Thai has no plural: its noun is the English `many`, as a key.
+    out.push_str(if scoped_lang().unwrap_or_default() == Lang::En {
+        if n == 1 { one } else { many }
+    } else {
+        tr(many)
+    });
     out
 }
 
@@ -526,7 +559,7 @@ pub fn count_text(n: u64, one: &str, many: &str) -> String {
 pub fn human_bytes(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["KiB", "MiB", "GiB", "TiB"];
     if bytes < 1024 {
-        return format!("{bytes} B");
+        return format!("{bytes} {}", crate::i18n::tr("B"));
     }
     let mut value = bytes as f64 / 1024.;
     let mut unit = 0;
@@ -576,6 +609,9 @@ pub struct ReportOptions {
     pub mask: bool,
     pub unimportant: bool,
     pub same: bool,
+    /// The language the report reads in. Writers set it for their thread; the UI's own language
+    /// never reaches a report.
+    pub lang: Lang,
 }
 
 /// What the page header and the Summary sheet say about the compare.
@@ -597,14 +633,14 @@ pub struct ReportContext {
 }
 
 /// PF12: what every format adds to "not scanned" (I-1).
-pub const NOT_SCANNED_HINT: &str = "run the scan in the folder tab first";
+pub const NOT_SCANNED_HINT: &str = tr_key("run the scan in the folder tab first");
 
 pub fn criterion_text(mode: CompareMode) -> &'static str {
     match mode {
-        CompareMode::Content => "File contents (modified times not counted)",
-        CompareMode::Rules => "Contents by the text compare rules",
-        CompareMode::Size => "File size only (contents not read)",
-        CompareMode::Quick => "Modified time and size (contents not read)",
+        CompareMode::Content => tr("File contents (modified times not counted)"),
+        CompareMode::Rules => tr("Contents by the text compare rules"),
+        CompareMode::Size => tr("File size only (contents not read)"),
+        CompareMode::Quick => tr("Modified time and size (contents not read)"),
     }
 }
 
@@ -642,20 +678,20 @@ pub fn rules_text(rules: &FolderTextRules) -> String {
     let mut parts: Vec<String> = Vec::new();
     match rules.whitespace {
         WhitespaceMode::None => {}
-        WhitespaceMode::Trailing => parts.push("Ignore trailing whitespace".into()),
-        WhitespaceMode::Leading => parts.push("Ignore leading whitespace".into()),
-        WhitespaceMode::Edges => parts.push("Ignore whitespace at both ends".into()),
-        WhitespaceMode::Amount => parts.push("Ignore the amount of whitespace".into()),
-        WhitespaceMode::All => parts.push("Ignore all whitespace".into()),
+        WhitespaceMode::Trailing => parts.push(tr("Ignore trailing whitespace").into()),
+        WhitespaceMode::Leading => parts.push(tr("Ignore leading whitespace").into()),
+        WhitespaceMode::Edges => parts.push(tr("Ignore whitespace at both ends").into()),
+        WhitespaceMode::Amount => parts.push(tr("Ignore the amount of whitespace").into()),
+        WhitespaceMode::All => parts.push(tr("Ignore all whitespace").into()),
     }
     if rules.ignore_case {
-        parts.push("Ignore case".into());
+        parts.push(tr("Ignore case").into());
     }
     if rules.ignore_blank {
-        parts.push("Ignore blank lines".into());
+        parts.push(tr("Ignore blank lines").into());
     }
     if rules.ignore_comments {
-        parts.push("Ignore comments".into());
+        parts.push(tr("Ignore comments").into());
     }
     let patterns = (rules.text.len() + rules.lines.len()) as u64;
     if patterns > 0 {
@@ -666,7 +702,7 @@ pub fn rules_text(rules: &FolderTextRules) -> String {
         ));
     }
     if parts.is_empty() {
-        "Every character counts".to_owned()
+        tr("Every character counts").to_owned()
     } else {
         parts.join(", ")
     }

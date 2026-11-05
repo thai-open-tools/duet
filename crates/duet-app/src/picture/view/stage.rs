@@ -26,6 +26,7 @@ use crate::picture::zoom::{
 use crate::ui::drag::follow_drag;
 use crate::ui::fonts::{BADGE_SIZE, SMALL_SIZE};
 use crate::ui::menu::fill as fill_menu;
+use crate::ui::prose::ProseExt as _;
 use crate::ui::scroll::{scroll_for_thumb, thumb};
 use crate::ui::style::SCROLLBAR_WIDTH;
 
@@ -33,11 +34,11 @@ use crate::ui::style::SCROLLBAR_WIDTH;
 const BAR: f32 = SCROLLBAR_WIDTH;
 /// The checkerboard image's side, in px (LocalDiff's 8 px squares).
 const CHECKER: f32 = 64.;
-const OPEN_OTHER: &str = "Open the other picture to start comparing.";
-const BIG_NO_IMAGE: &str = "A picture is larger than 40 megapixels: no difference image.";
-const OPEN_BOTH: &str = "Open both pictures first.";
-const NO_GROUPS: &str = "No differences above the tolerance.";
-const NO_RESULT: &str = "No comparison yet: press F5 to compare.";
+const OPEN_OTHER: &str = tr_key("Open the other picture to start comparing.");
+const BIG_NO_IMAGE: &str = tr_key("A picture is larger than 40 megapixels: no difference image.");
+const OPEN_BOTH: &str = tr_key("Open both pictures first.");
+const NO_GROUPS: &str = tr_key("No differences above the tolerance.");
+const NO_RESULT: &str = tr_key("No comparison yet: press F5 to compare.");
 
 /// Where a picture is drawn: one of the two side-by-side panes, or the one pane of the other
 /// modes.
@@ -505,19 +506,19 @@ impl PictureView {
     pub fn go(&mut self, forward: bool, cx: &mut Context<Self>) {
         let Some(diff) = self.diff() else {
             if !self.both_ready() {
-                self.notice = Some(OPEN_BOTH.into());
+                self.notice = Some(tr(OPEN_BOTH).into());
             } else if self.too_big() {
-                self.notice = Some(NO_DIFFERENCE.into());
+                self.notice = Some(tr(NO_DIFFERENCE).into());
             } else if !self.is_busy() {
                 // Esc cancelled the compare that would have made one.
-                self.notice = Some(NO_RESULT.into());
+                self.notice = Some(tr(NO_RESULT).into());
             }
             cx.notify();
             return;
         };
         let groups = diff.clusters.len();
         if groups == 0 {
-            self.notice = Some(NO_GROUPS.into());
+            self.notice = Some(tr(NO_GROUPS).into());
             cx.notify();
             return;
         }
@@ -933,13 +934,13 @@ impl PictureView {
             return Some(loading.into());
         }
         if !self.both_ready() {
-            return Some(OPEN_OTHER.into());
+            return Some(tr(OPEN_OTHER).into());
         }
         (self.prefs.mode == Mode::Difference && self.too_big()).then(|| {
             if self.sides.iter().flatten().any(|side| side.info.big) {
-                BIG_NO_IMAGE.into()
+                tr(BIG_NO_IMAGE).into()
             } else {
-                NO_DIFFERENCE.into()
+                tr(NO_DIFFERENCE).into()
             }
         })
     }
@@ -951,7 +952,7 @@ impl PictureView {
         }
         let left = self.stage.blink_left;
         let name = &self.side(left)?.name;
-        let label = if left { "Left" } else { "Right" };
+        let label = tr(if left { "Left" } else { "Right" });
         Some((format!("{label}: {name}"), !left))
     }
 
@@ -966,7 +967,7 @@ impl PictureView {
         }
         self.loads[index]
             .is_running()
-            .then(|| (format!("Loading {}…", file_name(&self.paths[index])), false))
+            .then(|| (trf("Loading {}…", &[&file_name(&self.paths[index])]), false))
     }
 
     /// What every pane paints this frame, from `geoms`; keeps the list for the tests and hands
@@ -1345,8 +1346,8 @@ impl PictureView {
                 .w(px(2.))
                 .h(px(height as f32 * zoom))
                 .bg(p.accent)
-                .child(tag("◀ Left").right(px(8.)))
-                .child(tag("Right ▶").left(px(8.)))
+                .child(tag(tr("◀ Left")).right(px(8.)))
+                .child(tag(tr("Right ▶")).left(px(8.)))
                 .into_any_element(),
         )
     }
@@ -1374,7 +1375,7 @@ impl PictureView {
                 .p(px(20.))
                 .text_size(px(SMALL_SIZE))
                 .text_color(if failed { p.del } else { p.dim })
-                .child(text)
+                .prose(text)
                 .into_any_element(),
         )
     }
@@ -1430,7 +1431,7 @@ impl PictureView {
                         .border_color(p.line)
                         .text_color(p.muted)
                         .text_size(px(SMALL_SIZE))
-                        .child(text),
+                        .prose(text),
                 )
                 .into_any_element(),
         )

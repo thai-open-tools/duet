@@ -171,3 +171,16 @@ fn a_note_on_several_lines_keeps_crlf() {
         );
     }
 }
+
+#[test]
+fn text_report_line_names_the_other_path() {
+    let mut moved = item("a.txt", ItemState::LeftOnly);
+    moved.moved_to = Some("new/a.txt".to_owned());
+    let text = folder_text(&[moved], None, &options(), &context());
+    assert!(
+        text.contains(
+            "  < a.txt   \u{2014} only in IWT \u{b7} Same contents as new/a.txt in PRD (moved or renamed)"
+        ),
+        "{text}"
+    );
+}

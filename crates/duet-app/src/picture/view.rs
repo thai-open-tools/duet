@@ -16,6 +16,8 @@ use gpui_kit::{
     Task, Window, actions, prelude::*, px,
 };
 
+use crate::i18n::errors::decode_error;
+use crate::i18n::{LiveText, tr, tr_key, trf};
 use crate::job::JobSlot;
 use crate::palette::Palette;
 use crate::pathbar::ActiveEdit;
@@ -60,11 +62,11 @@ pub const CONTEXT: &str = "PictureView";
 /// The blink mode shows the other picture this often.
 pub const BLINK_INTERVAL: Duration = Duration::from_millis(600);
 
-const CANCELLED: &str = "Cancelled: the result is incomplete.";
-const RELOADED: &str = "Pictures reloaded.";
-const NOTHING_TO_RELOAD: &str = "No pictures to reload.";
+const CANCELLED: &str = tr_key("Cancelled: the result is incomplete.");
+const RELOADED: &str = tr_key("Pictures reloaded.");
+const NOTHING_TO_RELOAD: &str = tr_key("No pictures to reload.");
 /// A picture over the pixel limit, or a pair too large to hold a difference image (R10).
-const NO_DIFFERENCE: &str = "No difference can be computed for these pictures.";
+const NO_DIFFERENCE: &str = tr_key("No difference can be computed for these pictures.");
 
 pub fn key_bindings() -> Vec<KeyBinding> {
     let c = Some(CONTEXT);
@@ -147,7 +149,7 @@ pub struct Compared {
 
 enum LoadError {
     Cancelled,
-    Message(String),
+    Message(LiveText),
 }
 
 const LEFT: usize = 0;
@@ -169,7 +171,13 @@ fn load_side(path: &Path, limits: &Limits, cancel: &CancelToken) -> Result<Side,
     let name = file_name(path);
     let fail = |err: DecodeError| match err {
         DecodeError::Cancelled => LoadError::Cancelled,
-        err => LoadError::Message(format!("Can't open {name}: {err}")),
+        err => {
+            // Built from data, so a switch of language says it again (`LiveText::relabel`).
+            let name = name.clone();
+            LoadError::Message(LiveText::new(move || {
+                trf("Can't open {}: {}", &[&name, &decode_error(&err)])
+            }))
+        }
     };
     let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
     let bytes = read(path, limits).map_err(&fail)?;
@@ -203,7 +211,7 @@ pub struct PictureView {
     paths: [PathBuf; 2],
     sides: [Option<Side>; 2],
     /// Why a side could not be opened.
-    messages: [Option<SharedString>; 2],
+    messages: [Option<LiveText>; 2],
     limits: Limits,
     /// One load per side, and the id of the load each side waits for (0 for none). A result
     /// lands on the side that holds its id, so a swap during a load moves the pending load with
@@ -229,7 +237,7 @@ pub struct PictureView {
     probe: Option<(u32, u32)>,
     notice: Option<SharedString>,
     /// A notice for the pair the workspace is about to load: `load_paths` clears the notice,
-    /// then shows this one.
+    /// then shows this one. A switch of language drops it, like any notice.
     carried: Option<SharedString>,
     /// The head whose name is being edited as a path.
     path_edit: Option<ActiveEdit>,
@@ -403,6 +411,17 @@ impl PictureView {
         left.big || right.big || union > self.limits.max_pixels.saturating_mul(2)
     }
 
+    /// The language changed: a notice is one-shot feedback in the old language, so it goes and the
+    /// status falls back to what it works out. A failed side's message is said again.
+    pub fn relabel(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.notice = None;
+        self.carried = None;
+        for message in self.messages.iter_mut().flatten() {
+            message.relabel();
+        }
+        cx.notify();
+    }
+
     pub fn notice(&self) -> Option<&str> {
         self.notice.as_deref()
     }
@@ -454,7 +473,7 @@ impl PictureView {
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let with_file = [LEFT, RIGHT].map(|i| !self.paths[i].as_os_str().is_empty());
         if !with_file.contains(&true) {
-            self.notice = Some(NOTHING_TO_RELOAD.into());
+            self.notice = Some(tr(NOTHING_TO_RELOAD).into());
             cx.notify();
             return;
         }
@@ -543,9 +562,11 @@ impl PictureView {
                 self.set_side(index, Some(side));
                 self.messages[index] = None;
             }
-            Err(LoadError::Message(message)) => {
+            Err(LoadError::Message(mut message)) => {
                 self.set_side(index, None);
-                self.messages[index] = Some(message.into());
+                // Built on the job's thread: said again here, in the language now in force.
+                message.relabel();
+                self.messages[index] = Some(message);
             }
             Err(LoadError::Cancelled) => {
                 cx.notify();
@@ -557,7 +578,7 @@ impl PictureView {
             return;
         }
         if std::mem::take(&mut self.reloading) {
-            self.notice = Some(RELOADED.into());
+            self.notice = Some(tr(RELOADED).into());
         }
         self.compare_now(cx);
     }
@@ -576,7 +597,7 @@ impl PictureView {
         let Some((left, right)) = pictures else {
             self.retire_compared();
             if self.too_big() {
-                self.notice = Some(NO_DIFFERENCE.into());
+                self.notice = Some(tr(NO_DIFFERENCE).into());
             }
             cx.notify();
             return;
@@ -634,7 +655,7 @@ impl PictureView {
         self.diff_task = None;
         self.restore_tolerance(cx);
         self.reloading = false;
-        self.notice = Some(CANCELLED.into());
+        self.notice = Some(tr(CANCELLED).into());
         cx.notify();
     }
 

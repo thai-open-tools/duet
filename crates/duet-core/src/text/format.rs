@@ -118,7 +118,7 @@ fn trim_line_ends(text: &str) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tok<'a> {
+pub(super) enum Tok<'a> {
     Open(u8),
     Close(u8),
     Comma,
@@ -126,59 +126,118 @@ enum Tok<'a> {
     Scalar(&'a str),
 }
 
-fn json_tokens(src: &str) -> Option<Vec<Tok<'_>>> {
+/// Why a JSON text was refused, and where (a byte offset into the scanned text).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct JsonError {
+    pub offset: usize,
+    pub kind: JsonErrorKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum JsonErrorKind {
+    ExpectedValue,
+    ExpectedKey,
+    ExpectedColon,
+    ExpectedCommaOrClose,
+    /// A comma before `}` (true) or `]` (false).
+    TrailingComma(bool),
+    Mismatched,
+    Unterminated,
+    UnexpectedChar,
+    Extra,
+    TooDeep,
+    UnexpectedEnd,
+    /// More nodes than the caller allowed (`json_scan_limited`).
+    TooBig,
+}
+
+/// The tokens of `src` with the byte offset each starts at, or the first error. The grammar and
+/// `MAX_DEPTH` are exactly those of `format_json`.
+pub(super) fn json_scan(src: &str) -> Result<Vec<(Tok<'_>, usize)>, JsonError> {
+    json_scan_limited(src, usize::MAX)
+}
+
+/// `json_scan`, but it stops with `TooBig` as soon as the tokens read so far hold more than
+/// `max_nodes` values (keys not counted), before the rest of a huge text is turned into tokens.
+pub(super) fn json_scan_limited(
+    src: &str,
+    max_nodes: usize,
+) -> Result<Vec<(Tok<'_>, usize)>, JsonError> {
+    let tokens = json_lex(src, max_nodes)?;
+    json_check(&tokens, src.len())?;
+    Ok(tokens)
+}
+
+fn json_lex(src: &str, max_nodes: usize) -> Result<Vec<(Tok<'_>, usize)>, JsonError> {
     let bytes = src.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
+    let fail = |offset, kind| Err(JsonError { offset, kind });
+    // Values so far: an opening bracket or a scalar, less the keys (a scalar before a colon).
+    let mut nodes = 0usize;
+    macro_rules! push {
+        ($tok:expr, $at:expr) => {{
+            let tok = $tok;
+            match tok {
+                Tok::Open(_) | Tok::Scalar(_) => nodes += 1,
+                Tok::Colon => nodes = nodes.saturating_sub(1),
+                _ => {}
+            }
+            if nodes > max_nodes {
+                return fail($at, JsonErrorKind::TooBig);
+            }
+            out.push((tok, $at));
+        }};
+    }
     while i < bytes.len() {
+        let at = i;
         match bytes[i] {
             b' ' | b'\t' | b'\n' | b'\r' => i += 1,
             c @ (b'{' | b'[') => {
-                out.push(Tok::Open(c));
+                push!(Tok::Open(c), at);
                 i += 1;
             }
             c @ (b'}' | b']') => {
-                out.push(Tok::Close(c));
+                push!(Tok::Close(c), at);
                 i += 1;
             }
             b',' => {
-                out.push(Tok::Comma);
+                push!(Tok::Comma, at);
                 i += 1;
             }
             b':' => {
-                out.push(Tok::Colon);
+                push!(Tok::Colon, at);
                 i += 1;
             }
             b'"' => {
-                let start = i;
                 i += 1;
                 loop {
-                    match *bytes.get(i)? {
-                        b'\\' => i += 2,
-                        b'"' => {
+                    match bytes.get(i) {
+                        None => return fail(at, JsonErrorKind::Unterminated),
+                        Some(b'\\') => i += 2,
+                        Some(b'"') => {
                             i += 1;
                             break;
                         }
-                        c if c < 0x20 => return None,
-                        _ => i += 1,
+                        Some(c) if *c < 0x20 => return fail(i, JsonErrorKind::UnexpectedChar),
+                        Some(_) => i += 1,
                     }
                 }
-                out.push(Tok::Scalar(&src[start..i]));
+                push!(Tok::Scalar(&src[at..i]), at);
             }
             _ => {
-                let start = i;
                 while i < bytes.len() && !b" \t\n\r{}[],:\"".contains(&bytes[i]) {
                     i += 1;
                 }
-                let literal = &src[start..i];
+                let literal = &src[at..i];
                 if !matches!(literal, "true" | "false" | "null") && !valid_number(literal) {
-                    return None;
+                    return fail(at, JsonErrorKind::UnexpectedChar);
                 }
-                out.push(Tok::Scalar(literal));
+                push!(Tok::Scalar(literal), at);
             }
         }
     }
-    Some(out)
+    Ok(out)
 }
 
 fn valid_number(s: &str) -> bool {
@@ -229,18 +288,21 @@ enum Expect {
 }
 
 /// A token-level grammar check with an explicit stack (deep nesting cannot overflow).
-fn json_valid(tokens: &[Tok<'_>]) -> bool {
+fn json_check(tokens: &[(Tok<'_>, usize)], end: usize) -> Result<(), JsonError> {
     let mut stack: Vec<u8> = Vec::new();
     let mut expect = Expect::Value;
     let mut started = false;
-    for &tok in tokens {
+    let mut after_comma = false;
+    for &(tok, offset) in tokens {
+        let fail = |kind| Err(JsonError { offset, kind });
         if started && stack.is_empty() {
-            return false; // something after the root value
+            return fail(JsonErrorKind::Extra); // something after the root value
         }
         started = true;
+        let was_comma = std::mem::replace(&mut after_comma, tok == Tok::Comma);
         expect = match (expect, tok) {
             (Expect::Value | Expect::ValueOrClose, Tok::Open(_)) if stack.len() == MAX_DEPTH => {
-                return false;
+                return fail(JsonErrorKind::TooDeep);
             }
             (Expect::Value | Expect::ValueOrClose, Tok::Open(b'{')) => {
                 stack.push(b'{');
@@ -270,22 +332,43 @@ fn json_valid(tokens: &[Tok<'_>]) -> bool {
                 };
                 let open = if close == b'}' { b'{' } else { b'[' };
                 if stack.pop() != Some(open) {
-                    return false;
+                    return fail(JsonErrorKind::Mismatched);
                 }
                 Expect::CommaOrClose
             }
-            _ => return false,
+            (Expect::Key | Expect::Value, Tok::Close(close)) if was_comma => {
+                return fail(JsonErrorKind::TrailingComma(close == b'}'));
+            }
+            (Expect::Value | Expect::ValueOrClose, _) => {
+                return fail(JsonErrorKind::ExpectedValue);
+            }
+            (Expect::Key | Expect::KeyOrClose, _) => return fail(JsonErrorKind::ExpectedKey),
+            (Expect::Colon, _) => return fail(JsonErrorKind::ExpectedColon),
+            (Expect::CommaOrClose, _) => return fail(JsonErrorKind::ExpectedCommaOrClose),
         };
     }
-    started && stack.is_empty() && expect == Expect::CommaOrClose
+    if !started {
+        return Err(JsonError {
+            offset: end,
+            kind: JsonErrorKind::ExpectedValue,
+        });
+    }
+    if !stack.is_empty() || expect != Expect::CommaOrClose {
+        return Err(JsonError {
+            offset: end,
+            kind: JsonErrorKind::UnexpectedEnd,
+        });
+    }
+    Ok(())
 }
 
 /// Re-indents valid JSON; scalars are copied as written. None for anything invalid.
 pub fn format_json(src: &str) -> Option<String> {
-    let tokens = json_tokens(src)?;
-    if !json_valid(&tokens) {
-        return None;
-    }
+    let tokens: Vec<Tok<'_>> = json_scan(src)
+        .ok()?
+        .into_iter()
+        .map(|(tok, _)| tok)
+        .collect();
     let mut out = String::with_capacity(src.len() + src.len() / 4);
     let newline = |out: &mut String, depth: usize| {
         out.push('\n');

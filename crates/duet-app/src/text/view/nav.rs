@@ -6,15 +6,15 @@ impl TextView {
     pub(super) fn land(&mut self, landing: Option<Landing>, first: bool, cx: &mut Context<Self>) {
         self.notice = match landing {
             Some(Landing { wrapped: true, .. }) => Some(
-                if first {
+                tr(if first {
                     "Wrapped to the first difference."
                 } else {
                     "Wrapped to the last difference."
-                }
+                })
                 .into(),
             ),
             Some(_) => None,
-            None => Some("No differences to go to.".into()),
+            None => Some(tr("No differences to go to.").into()),
         };
         if let Some(landing) = landing {
             self.scroll_to_follow_line(landing.display);
@@ -186,6 +186,9 @@ impl TextView {
     /// Ctrl+Shift+S: Save as… for the caret's side, the left one with no caret.
     pub(super) fn on_save_as(&mut self, _: &SaveAs, window: &mut Window, cx: &mut Context<Self>) {
         let left = self.caret.is_none_or(|c| c.left);
+        if self.refuse_save_as_of_view(left, cx) {
+            return;
+        }
         if self.side_has_text(left) {
             self.save_as_dialog(left, window, cx);
         }
@@ -216,12 +219,12 @@ impl TextView {
             self.job.cancel();
             self.task = None;
             if self.model.is_none() {
-                self.set_message("Compare cancelled.", CANCELLED_HINT);
+                self.set_message(live("Compare cancelled."), CANCELLED_HINT);
                 // A notice now is about a key pressed while the compare ran, such as the
                 // wait notice; nothing runs any more.
                 self.notice = None;
             } else {
-                self.notice = Some("Reload cancelled; showing the previous result.".into());
+                self.notice = Some(tr("Reload cancelled; showing the previous result.").into());
                 // The reload dropped any pending re-diff of the edited buffers, whose rows may
                 // still be provisional.
                 if self

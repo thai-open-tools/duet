@@ -7,15 +7,16 @@ use gpui_kit::{AnyElement, FontWeight, Hsla, div, rgb};
 
 use super::*;
 use crate::format::{count_of, format_size, format_time, human_size};
+use crate::i18n::{tr, tr_key, trf};
 use crate::picture::prefs::Mode;
 use crate::status::{StatusPart, Tone};
 use crate::ui::fonts::Fonts;
-use crate::ui::style::{status_bar, status_line_box, status_parts_row};
+use crate::ui::style::{status_bar, status_line_box, status_notice, status_parts_row};
 
-const OPEN_OTHER: &str = "Open the other picture to start comparing.";
+const OPEN_OTHER: &str = tr_key("Open the other picture to start comparing.");
 const TOO_BIG: &str =
-    "A picture is larger than 40 megapixels: it is shown, but pixels are not compared.";
-const NOT_THE_SAME_SIZE: &str = "Not the same size as the other side";
+    tr_key("A picture is larger than 40 megapixels: it is shown, but pixels are not compared.");
+const NOT_THE_SAME_SIZE: &str = tr_key("Not the same size as the other side");
 
 /// What one head shows: the picture's name, its size line, and how to colour them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,7 +53,7 @@ impl PictureView {
             .filter(|&left| self.loading(left))
             .map(|left| file_name(&self.paths[side_index(left)]))
             .collect();
-        (!names.is_empty()).then(|| format!("Loading {}…", names.join(" and ")))
+        (!names.is_empty()).then(|| trf("Loading {}…", &[&names.join(tr(" and "))]))
     }
 
     /// The status line as coloured parts (`js:598-627`).
@@ -61,10 +62,10 @@ impl PictureView {
             return vec![StatusPart::new(loading, Tone::Muted)];
         }
         let (Some(left), Some(right)) = (&self.sides[LEFT], &self.sides[RIGHT]) else {
-            return vec![StatusPart::new(OPEN_OTHER, Tone::Changed)];
+            return vec![StatusPart::new(tr(OPEN_OTHER), Tone::Changed)];
         };
         if self.too_big() {
-            return vec![StatusPart::new(TOO_BIG, Tone::Changed)];
+            return vec![StatusPart::new(tr(TOO_BIG), Tone::Changed)];
         }
         let Some(diff) = self.diff() else {
             return Vec::new();
@@ -72,25 +73,27 @@ impl PictureView {
         let mut parts = Vec::new();
         if diff.count == 0 && diff.minor == 0 {
             let text = if diff.size_mismatch {
-                "Every pixel of the overlap is the same."
+                tr("Every pixel of the overlap is the same.")
             } else {
-                "Every pixel is the same."
+                tr("Every pixel is the same.")
             };
             parts.push(StatusPart::new(text, Tone::RightOnly));
         } else if diff.count == 0 {
             parts.push(StatusPart::new(
-                "Same within the tolerance",
+                tr("Same within the tolerance"),
                 Tone::RightOnly,
             ));
             parts.push(StatusPart::new(
-                format!(
+                trf(
                     "{}, largest difference {}",
-                    count_of(
-                        diff.minor,
-                        "pixel differs slightly",
-                        "pixels differ slightly"
-                    ),
-                    diff.max_delta
+                    &[
+                        &count_of(
+                            diff.minor,
+                            "pixel differs slightly",
+                            "pixels differ slightly",
+                        ),
+                        &diff.max_delta,
+                    ],
                 ),
                 Tone::Muted,
             ));
@@ -105,7 +108,7 @@ impl PictureView {
             ));
             if diff.minor > 0 {
                 parts.push(StatusPart::new(
-                    format!("{} more within the tolerance", format_size(diff.minor)),
+                    trf("{} more within the tolerance", &[&format_size(diff.minor)]),
                     Tone::Muted,
                 ));
             }
@@ -113,7 +116,10 @@ impl PictureView {
                 .current_group()
                 .map_or("–".to_owned(), |at| format_size(at as u64 + 1));
             parts.push(StatusPart::new(
-                format!("Group {at} / {}", format_size(diff.clusters.len() as u64)),
+                trf(
+                    "Group {} / {}",
+                    &[&at, &format_size(diff.clusters.len() as u64)],
+                ),
                 Tone::Text,
             ));
         }
@@ -122,9 +128,9 @@ impl PictureView {
             parts.insert(
                 1,
                 StatusPart::new(
-                    format!(
+                    trf(
                         "Sizes differ ({}×{} and {}×{}): only the {}×{} overlap is compared.",
-                        a.width, a.height, b.width, b.height, c.0, c.1
+                        &[&a.width, &a.height, &b.width, &b.height, &c.0, &c.1],
                     ),
                     Tone::Changed,
                 ),
@@ -136,14 +142,16 @@ impl PictureView {
     /// "Tolerance 5 · Side by side", or "· computing…" while the result for it is on its way.
     pub fn tolerance_text(&self) -> String {
         let computing = self.tolerance.pending || self.diff_job.is_running();
-        format!(
+        trf(
             "Tolerance {} · {}",
-            self.prefs.tolerance,
-            if computing {
-                "computing…"
-            } else {
-                self.prefs.mode.label()
-            }
+            &[
+                &self.prefs.tolerance,
+                &if computing {
+                    tr("computing…")
+                } else {
+                    tr(self.prefs.mode.label())
+                },
+            ],
         )
     }
 
@@ -178,9 +186,9 @@ impl PictureView {
         }
         let failed = self.messages[index].is_some();
         let meta = if failed {
-            "Can't open"
+            tr("Can't open")
         } else if self.loads[index].is_running() {
-            "Loading…"
+            tr("Loading…")
         } else {
             ""
         };
@@ -220,10 +228,10 @@ impl PictureView {
         let side = self.sides[index].as_ref()?;
         let mut lines = Vec::new();
         if self.head_text(left).dims_differ {
-            lines.push(NOT_THE_SAME_SIZE.to_owned());
+            lines.push(tr(NOT_THE_SAME_SIZE).to_owned());
         }
         if let Some(modified) = side.info.modified {
-            lines.push(format!("Modified {}", format_time(modified)));
+            lines.push(trf("Modified {}", &[&format_time(modified)]));
         }
         (!lines.is_empty()).then(|| lines.join("\n"))
     }
@@ -255,10 +263,9 @@ impl PictureView {
             Probed::Missing => "—".to_owned(),
             Probed::Big => "?".to_owned(),
         };
-        Some(format!(
-            "{x}, {y} · Left {} · Right {}",
-            value(values[LEFT]),
-            value(values[RIGHT])
+        Some(trf(
+            "{}, {} · Left {} · Right {}",
+            &[&x, &y, &value(values[LEFT]), &value(values[RIGHT])],
         ))
     }
 
@@ -295,6 +302,7 @@ impl PictureView {
     /// The legend of the difference image's colours (R18).
     fn render_legend(&self, p: &Palette) -> impl IntoElement {
         let item = |id: &'static str, color: [u8; 3], label: &'static str| {
+            let label = tr(label);
             h_flex()
                 .id(id)
                 .test_support()
@@ -319,9 +327,13 @@ impl PictureView {
             .gap(px(12.))
             .whitespace_nowrap()
             .text_color(p.muted)
-            .child(item("picture-legend-diff", C_DIFF, "Differs"))
-            .child(item("picture-legend-minor", C_MINOR, "Within tolerance"))
-            .child(item("picture-legend-only", C_ONLY, "One side only"))
+            .child(item("picture-legend-diff", C_DIFF, tr_key("Differs")))
+            .child(item(
+                "picture-legend-minor",
+                C_MINOR,
+                tr_key("Within tolerance"),
+            ))
+            .child(item("picture-legend-only", C_ONLY, tr_key("One side only")))
     }
 
     /// The probe: the pixel's place and each picture's value after a swatch of its colour.
@@ -361,9 +373,9 @@ impl PictureView {
                 .gap(px(4.))
                 .whitespace_nowrap()
                 .font(fonts.code.clone())
-                .child(format!("{x}, {y} · Left"))
+                .child(trf("{}, {} · Left", &[&x, &y]))
                 .child(value(values[LEFT]))
-                .child("· Right")
+                .child(tr("· Right"))
                 .child(value(values[RIGHT])),
         )
     }
@@ -373,19 +385,14 @@ impl PictureView {
         let parts = self.status_parts();
         let legend = (self.mode() == Mode::Difference && self.compared.is_some())
             .then(|| self.render_legend(p));
-        let notice = self.notice().map(|notice| {
-            div()
-                .id("picture-notice")
-                .test_support()
-                .flex_none()
-                .text_color(p.text)
-                .child(notice.to_owned())
-        });
+        let notice = self
+            .notice()
+            .map(|notice| status_notice("picture-notice", notice, p));
         status_bar("picture-status", p)
             .child(if parts.is_empty() {
-                status_line_box("")
+                status_line_box("picture-status-text", "", "")
             } else {
-                status_parts_row(&parts, p)
+                status_parts_row("picture-status-text", &parts, p)
             })
             .children(legend)
             .children(self.render_probe(p, fonts))

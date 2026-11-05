@@ -4,6 +4,7 @@ pub mod actions;
 pub mod classify;
 pub mod content;
 pub mod entry;
+pub mod moves;
 pub mod odd_scan;
 pub mod plan;
 pub mod report;

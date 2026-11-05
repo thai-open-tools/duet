@@ -7,7 +7,7 @@ use super::stage::{CENTRE_GUTTER, OVERVIEW_WIDTH};
 use super::*;
 use crate::ui::style::SCROLLBAR_WIDTH;
 
-const EMPTY_HINT: &str = "Type or paste here (Ctrl+V), or open a file (Ctrl+O).";
+const EMPTY_HINT: &str = tr_key("Type or paste here (Ctrl+V), or open a file (Ctrl+O).");
 const CARET_WIDTH: f32 = 1.5;
 
 impl TextView {
@@ -49,7 +49,7 @@ impl TextView {
                         .px(px(12.))
                         .py(px(8.))
                         .text_color(palette.muted)
-                        .child(EMPTY_HINT),
+                        .prose(tr(EMPTY_HINT)),
                 )
                 .when(caret_here, |d| {
                     d.child(

@@ -37,6 +37,9 @@ tree-sitter.workspace = true
 tree-sitter-powershell.workspace = true
 unicode-segmentation.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
+
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true

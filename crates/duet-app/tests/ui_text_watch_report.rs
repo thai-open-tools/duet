@@ -696,3 +696,32 @@ async fn patch_and_text_reports_refuse_files_over_64_mib(cx: &mut TestAppContext
     assert!(cx.has_pending_prompt());
     cx.simulate_prompt_answer("Cancel");
 }
+
+#[gpui_kit::test]
+async fn a_patch_of_a_sorted_or_formatted_view_is_refused(cx: &mut TestAppContext) {
+    for sorted in [true, false] {
+        for label in ["Patch file (unified diff)…", "Copy patch to the clipboard"] {
+            let (_dir, handle, view) = open_text(cx, "{\"b\":1,\"a\":2}", "{\"a\":3,\"b\":1}");
+            wait_loaded(cx, handle, &view).await;
+            view.update(cx, |v, cx| {
+                if sorted {
+                    v.set_sort_keys_for_test(true, cx)
+                } else {
+                    v.set_format_for_test(true, cx)
+                }
+            });
+            wait_loaded(cx, handle, &view).await;
+            assert!(run_report(cx, handle, &view, label));
+            let wanted = if sorted {
+                "A patch can't describe the sorted view. Turn Sort keys off first."
+            } else {
+                "A patch can't describe the formatted view. Turn Format off first."
+            };
+            assert_eq!(notice(cx, &view).as_deref(), Some(wanted), "{label}");
+            assert!(!cx.did_prompt_for_new_path(), "{label}: no dialog");
+            assert!(cx.read_from_clipboard().is_none(), "{label}: no patch");
+            // The reports that carry the view's notes stay.
+            assert_eq!(report_items(cx, &view), REPORT_ITEMS);
+        }
+    }
+}

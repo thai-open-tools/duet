@@ -2,6 +2,8 @@
 
 use std::borrow::Cow;
 
+use crate::table::xlsx::unmarked;
+
 /// The value as an exact decimal string, or `None` when it is not a number. Never goes through
 /// `f64` (long account numbers must not round equal) except for absurd exponents.
 ///
@@ -127,6 +129,9 @@ pub struct CellRules {
     pub ignore_case: bool,
     pub trim: bool,
     pub numbers: bool,
+    /// Both tables carry the text marker (`xlsx`), so the numbers rule reads a marked number as
+    /// the number it spells. [`compare`](super::compare::compare) sets it from the tables.
+    pub marked: bool,
 }
 
 impl CellRules {
@@ -134,12 +139,14 @@ impl CellRules {
         !self.ignore_case && !self.trim && !self.numbers
     }
 
-    /// Numbers first (a number is its canonical text), then trim, then lowercase.
+    /// Numbers first (a number is its canonical text, a marked one too), then trim, then
+    /// lowercase.
     pub fn normalize<'a>(&self, value: &'a str) -> Cow<'a, str> {
-        if self.numbers
-            && let Some(n) = num_canon(value)
-        {
-            return Cow::Owned(n);
+        if self.numbers {
+            let bare = if self.marked { unmarked(value) } else { value };
+            if let Some(n) = num_canon(bare) {
+                return Cow::Owned(n);
+            }
         }
         let value = if self.trim { value.trim() } else { value };
         if self.ignore_case {

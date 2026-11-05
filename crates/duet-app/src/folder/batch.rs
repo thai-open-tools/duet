@@ -20,6 +20,8 @@ use crate::folder::model::FolderModel;
 use crate::folder::ops::Direction;
 use crate::folder::view::FolderView;
 use crate::format::count_of;
+use crate::i18n::errors::{action_error, action_text};
+use crate::i18n::{OK, answers, live, tr, tr_key, tr_str, trf};
 
 /// Paths a copy or delete prompt lists before "…and N more".
 const LISTED: usize = 6;
@@ -59,7 +61,10 @@ impl RunningBatch {
     /// "Copying 3 of 7… Press Esc to cancel."
     pub fn progress_text(&self) -> String {
         let at = self.done.load(Ordering::Relaxed).min(self.total);
-        format!("{} {at} of {}… Press Esc to cancel.", self.verb, self.total)
+        trf(
+            "{} {} of {}… Press Esc to cancel.",
+            &[&tr(self.verb), &at, &self.total],
+        )
     }
 }
 
@@ -71,8 +76,8 @@ impl Drop for RunningBatch {
 
 fn sides(direction: Direction) -> (&'static str, &'static str) {
     match direction {
-        Direction::LeftToRight => ("left", "right"),
-        Direction::RightToLeft => ("right", "left"),
+        Direction::LeftToRight => (tr_key("left"), tr_key("right")),
+        Direction::RightToLeft => (tr_key("right"), tr_key("left")),
     }
 }
 
@@ -111,7 +116,7 @@ pub fn copy_prompt_with(
             count_of(batch.bytes, "byte", "bytes")
         )
     };
-    let message = format!("Copy {what} from {from} to {to}?");
+    let message = trf("Copy {} from {} to {}?", &[&what, &tr(from), &tr(to)]);
     let mut sections = Vec::new();
     let overwrites = batch.overwrites();
     if overwrites > 0 {
@@ -119,13 +124,13 @@ pub fn copy_prompt_with(
     }
     if !batch.files.is_empty() && !batch.mkdirs.is_empty() {
         let folders = count_of(batch.mkdirs.len() as u64, "empty folder", "empty folders");
-        sections.push(format!("Creates {folders}."));
+        sections.push(trf("Creates {}.", &[&folders]));
     }
     let detail = sections.join("\n\n");
     if overwrites > 0 {
-        (message, detail, vec!["Cancel", "Copy"], 1)
+        (message, detail, vec![tr_key("Cancel"), tr_key("Copy")], 1)
     } else {
-        (message, detail, vec!["Copy", "Cancel"], 0)
+        (message, detail, vec![tr_key("Copy"), tr_key("Cancel")], 0)
     }
 }
 
@@ -138,14 +143,15 @@ pub(super) fn overwrite_lines(
     listed: usize,
 ) -> String {
     let files = count_of(count as u64, "file", "files");
-    let mut lines = vec![format!("Overwrites {files} on the {side}.")];
+    let mut lines = vec![trf("Overwrites {} on the {}.", &[&files, &tr_str(side)])];
     let newer = conflicts.iter().filter(|c| c.destination_newer).count();
     match (count, newer) {
         (_, 0) => {}
-        (1, _) => lines.push("It is newer than the copy that replaces it.".to_owned()),
-        (_, 1) => lines.push("1 of them is newer than the copy that replaces it.".to_owned()),
-        (_, n) => lines.push(format!(
-            "{n} of them are newer than the copies that replace them."
+        (1, _) => lines.push(tr("It is newer than the copy that replaces it.").to_owned()),
+        (_, 1) => lines.push(tr("1 of them is newer than the copy that replaces it.").to_owned()),
+        (_, n) => lines.push(trf(
+            "{} of them are newer than the copies that replace them.",
+            &[&n],
         )),
     }
     lines.push(String::new());
@@ -158,7 +164,7 @@ pub(super) fn overwrite_lines(
             .map(|c| c.path.display().to_string()),
     );
     if count > listed {
-        lines.push(format!("…and {} more", count - listed));
+        lines.push(trf("…and {} more", &[&(count - listed)]));
     }
     lines.join("\n")
 }
@@ -169,17 +175,17 @@ pub fn copy_result(report: &BatchReport, files: usize, folders: usize) -> String
     if report.cancelled {
         let tried = report.done + report.failed.len();
         if folders == 0 {
-            return format!("Copy cancelled after {tried} of {files} files.");
+            return trf("Copy cancelled after {} of {} files.", &[&tried, &files]);
         }
         let tried_files = tried.min(files);
-        return format!(
-            "Copy cancelled after {tried_files} of {files} files and {} of {folders} folders.",
-            tried - tried_files
+        return trf(
+            "Copy cancelled after {} of {} files and {} of {} folders.",
+            &[&tried_files, &files, &(tried - tried_files), &folders],
         );
     }
     let made = count_of(report.folders as u64, "folder", "folders");
     let copied = if files == 0 && folders > 0 {
-        format!("Created {made}")
+        trf("Created {}", &[&made])
     } else {
         let copied = count_of(
             report.done.saturating_sub(report.folders) as u64,
@@ -187,16 +193,20 @@ pub fn copy_result(report: &BatchReport, files: usize, folders: usize) -> String
             "files",
         );
         match report.folders {
-            0 => format!("Copied {copied}"),
-            _ => format!("Copied {copied} and created {made}"),
+            0 => trf("Copied {}", &[&copied]),
+            _ => trf("Copied {} and created {}", &[&copied, &made]),
         }
     };
     match report.failed.first() {
-        None => format!("{copied}."),
-        Some((path, err)) => format!(
-            "{copied}; {} failed: {}: {err}.",
-            report.failed.len(),
-            path.display()
+        None => trf("{}.", &[&copied]),
+        Some((path, err)) => trf(
+            "{}; {} failed: {}: {}.",
+            &[
+                &copied,
+                &report.failed.len(),
+                &path.display(),
+                &action_text(err),
+            ],
         ),
     }
 }
@@ -208,20 +218,21 @@ pub fn trash_prompt(plans: &[(Side, TrashPlan)]) -> (String, String) {
     let paths: Vec<&PathBuf> = plans.iter().flat_map(|(_, p)| &p.paths).collect();
     let kept: usize = plans.iter().map(|(_, p)| p.kept_folders).sum();
     let changed: usize = plans.iter().map(|(_, p)| p.changed).sum();
-    let message = format!(
+    let message = trf(
         "Move {} to the Recycle Bin?",
-        count_of(paths.len() as u64, "item", "items")
+        &[&count_of(paths.len() as u64, "item", "items")],
     );
     let mut lines = Vec::new();
     if plans.iter().filter(|(_, p)| !p.paths.is_empty()).count() > 1 {
         let per_side: Vec<String> = plans
             .iter()
             .map(|(side, p)| {
-                let name = if *side == Side::Left { "Left" } else { "Right" };
-                format!(
-                    "{name}: {}.",
-                    count_of(p.paths.len() as u64, "item", "items")
-                )
+                let items = count_of(p.paths.len() as u64, "item", "items");
+                if *side == Side::Left {
+                    trf("Left: {}.", &[&items])
+                } else {
+                    trf("Right: {}.", &[&items])
+                }
             })
             .collect();
         lines.push(per_side.join(" "));
@@ -229,24 +240,28 @@ pub fn trash_prompt(plans: &[(Side, TrashPlan)]) -> (String, String) {
     }
     lines.extend(paths.iter().take(LISTED).map(|p| p.display().to_string()));
     if paths.len() > LISTED {
-        lines.push(format!("…and {} more", paths.len() - LISTED));
+        lines.push(trf("…and {} more", &[&(paths.len() - LISTED)]));
     }
     let mut notes = Vec::new();
     match kept {
         0 => {}
         1 => notes.push(
-            "1 folder still holds files that are not shown, so it stays; only the files you see go."
+            tr("1 folder still holds files that are not shown, so it stays; only the files you see go.")
                 .to_owned(),
         ),
-        n => notes.push(format!(
-            "{n} folders still hold files that are not shown, so they stay; only the files you see go."
+        n => notes.push(trf(
+            "{} folders still hold files that are not shown, so they stay; only the files you see go.",
+            &[&n],
         )),
     }
     match changed {
         0 => {}
-        1 => notes.push("1 item changed on disk since the compare and is left alone.".to_owned()),
-        n => notes.push(format!(
-            "{n} items changed on disk since the compare and are left alone."
+        1 => {
+            notes.push(tr("1 item changed on disk since the compare and is left alone.").to_owned())
+        }
+        n => notes.push(trf(
+            "{} items changed on disk since the compare and are left alone.",
+            &[&n],
         )),
     }
     if !notes.is_empty() {
@@ -259,16 +274,19 @@ pub fn trash_prompt(plans: &[(Side, TrashPlan)]) -> (String, String) {
 /// The answers of the Del choice prompt for the sides that have something to take, and what
 /// each answer after "Cancel" takes. "Cancel" is first, so Enter never deletes.
 pub fn delete_answers(have: &[Side]) -> (Vec<&'static str>, Vec<Vec<Side>>) {
-    let mut labels = vec!["Cancel"];
+    let mut labels = vec![tr_key("Cancel")];
     let mut picks = Vec::new();
-    for (label, side) in [("Delete left", Side::Left), ("Delete right", Side::Right)] {
+    for (label, side) in [
+        (tr_key("Delete left"), Side::Left),
+        (tr_key("Delete right"), Side::Right),
+    ] {
         if have.contains(&side) {
             labels.push(label);
             picks.push(vec![side]);
         }
     }
     if have.contains(&Side::Left) && have.contains(&Side::Right) {
-        labels.push("Delete both");
+        labels.push(tr_key("Delete both"));
         picks.push(vec![Side::Left, Side::Right]);
     }
     (labels, picks)
@@ -277,13 +295,13 @@ pub fn delete_answers(have: &[Side]) -> (Vec<&'static str>, Vec<Vec<Side>>) {
 /// The notice when every side in play has nothing to take.
 fn nothing_to_delete(plans: &[(Side, TrashPlan)], one_side: bool) -> &'static str {
     if plans.iter().any(|(_, p)| p.kept_folders > 0) {
-        "The selected folders hold only files that are not shown, so nothing was deleted."
+        tr("The selected folders hold only files that are not shown, so nothing was deleted.")
     } else if plans.iter().any(|(_, p)| p.changed > 0) {
-        "The selected items changed on disk since the compare. Press F5 to compare again."
+        tr("The selected items changed on disk since the compare. Press F5 to compare again.")
     } else if one_side {
-        "Nothing to delete on that side."
+        tr("Nothing to delete on that side.")
     } else {
-        "Nothing to delete."
+        tr("Nothing to delete.")
     }
 }
 
@@ -304,12 +322,15 @@ pub fn failure_prompt(failed: &[(PathBuf, String)]) -> Option<(String, String)> 
     let mut lines: Vec<String> = failed
         .iter()
         .take(FAILURES_LISTED)
-        .map(|(path, err)| format!("{}: {err}", path.display()))
+        .map(|(path, err)| format!("{}: {}", path.display(), action_text(err)))
         .collect();
     if failed.len() > FAILURES_LISTED {
-        lines.push(format!("…and {} more", failed.len() - FAILURES_LISTED));
+        lines.push(trf("…and {} more", &[&(failed.len() - FAILURES_LISTED)]));
     }
-    let message = format!("{} failed.", count_of(failed.len() as u64, "item", "items"));
+    let message = trf(
+        "{} failed.",
+        &[&count_of(failed.len() as u64, "item", "items")],
+    );
     Some((message, lines.join("\n")))
 }
 
@@ -318,43 +339,58 @@ fn first_failure(report: &BatchReport) -> Option<String> {
     report
         .failed
         .first()
-        .map(|(path, err)| format!("{}: {err}", path.display()))
+        .map(|(path, err)| format!("{}: {}", path.display(), action_text(err)))
 }
 
 /// The notice a finished delete leaves behind.
 pub fn trash_result(report: &BatchReport, total: usize, skipped: usize) -> String {
     if report.cancelled {
         let tried = report.done + report.failed.len();
-        return format!("Delete cancelled after {tried} of {total} items.");
+        return trf("Delete cancelled after {} of {} items.", &[&tried, &total]);
     }
     let moved = count_of(report.done as u64, "item", "items");
     let head = match first_failure(report) {
-        None => format!("Moved {moved} to the Recycle Bin."),
-        Some(first) => format!("Moved {moved}; {} failed: {first}.", report.failed.len()),
+        None => trf("Moved {} to the Recycle Bin.", &[&moved]),
+        Some(first) => trf(
+            "Moved {}; {} failed: {}.",
+            &[&moved, &report.failed.len(), &first],
+        ),
     };
     if skipped == 0 {
         return head;
     }
     let items = count_of(skipped as u64, "item", "items");
-    let verb = if skipped == 1 { "was" } else { "were" };
-    format!("{head} {items} changed on disk and {verb} left alone. Press F5 to compare again.")
+    if skipped == 1 {
+        trf(
+            "{} {} changed on disk and was left alone. Press F5 to compare again.",
+            &[&head, &items],
+        )
+    } else {
+        trf(
+            "{} {} changed on disk and were left alone. Press F5 to compare again.",
+            &[&head, &items],
+        )
+    }
 }
 
 /// The notice a finished touch leaves behind; `to` is the side that took the times.
 pub fn touch_result(report: &BatchReport, total: usize, to: Side) -> String {
     if report.cancelled {
         let tried = report.done + report.failed.len();
-        return format!("Touch cancelled after {tried} of {total} files.");
+        return trf("Touch cancelled after {} of {} files.", &[&tried, &total]);
     }
     let (to, from) = match to {
-        Side::Left => ("left", "right"),
-        Side::Right => ("right", "left"),
+        Side::Left => (tr_key("left"), tr_key("right")),
+        Side::Right => (tr_key("right"), tr_key("left")),
     };
     let files = count_of(report.done as u64, "file", "files");
-    let head = format!("Set the modified time of {files} on the {to} to match the {from}");
+    let head = trf(
+        "Set the modified time of {} on the {} to match the {}",
+        &[&files, &tr(to), &tr(from)],
+    );
     match first_failure(report) {
-        None => format!("{head}."),
-        Some(first) => format!("{head}; {} failed: {first}.", report.failed.len()),
+        None => trf("{}.", &[&head]),
+        Some(first) => trf("{}; {} failed: {}.", &[&head, &report.failed.len(), &first]),
     }
 }
 
@@ -467,7 +503,7 @@ impl FolderView {
         if self.batch.is_none() {
             return false;
         }
-        self.notice = Some("Wait for the running copy or delete to finish.".into());
+        self.notice = Some(tr("Wait for the running copy or delete to finish.").into());
         cx.notify();
         true
     }
@@ -526,7 +562,7 @@ impl FolderView {
             return false;
         };
         batch.cancel.cancel();
-        self.set_status("Cancelling…");
+        self.set_status_live(live("Cancelling…"));
         cx.notify();
         true
     }
@@ -547,7 +583,13 @@ impl FolderView {
         if let Some((message, detail)) = failure_prompt(failed) {
             cx.spawn_in(window, async move |this, cx| {
                 let Ok(answer) = this.update_in(cx, |_, window, cx| {
-                    window.prompt(PromptLevel::Warning, &message, Some(&detail), &["OK"], cx)
+                    window.prompt(
+                        PromptLevel::Warning,
+                        &message,
+                        Some(&detail),
+                        &answers(&[OK]),
+                        cx,
+                    )
                 }) else {
                     return;
                 };
@@ -598,8 +640,9 @@ impl FolderView {
         let batch = copy_batch(cmp, &ex, from, &self.left, &self.right);
         if batch.is_empty() {
             let (from_name, _) = sides(direction);
-            self.set_status(format!(
-                "Nothing to copy: the selection has no files on the {from_name}."
+            self.set_status(trf(
+                "Nothing to copy: the selection has no files on the {}.",
+                &[&tr(from_name)],
             ));
             cx.notify();
             return;
@@ -614,7 +657,7 @@ impl FolderView {
                 Ok(conflicts) => conflicts,
                 Err(err) => {
                     let _ = this.update(cx, |view, cx| {
-                        view.set_status(format!("Copy failed: {err}"));
+                        view.set_status(trf("Copy failed: {}", &[&action_error(&err)]));
                         cx.notify();
                     });
                     return;
@@ -623,7 +666,7 @@ impl FolderView {
             // R19: with "Ask before copying" off only a copy that overwrites nothing skips the
             // question; an overwrite always asks.
             if ask || batch.overwrites() > 0 {
-                let (message, detail, answers, confirm) =
+                let (message, detail, keys, confirm) =
                     copy_prompt_with(&batch, direction, &conflicts);
                 let level = if batch.overwrites() > 0 {
                     PromptLevel::Warning
@@ -632,7 +675,7 @@ impl FolderView {
                 };
                 let Ok(answer) = this.update_in(cx, |_, window, cx| {
                     let detail = (!detail.is_empty()).then_some(detail.as_str());
-                    window.prompt(level, &message, detail, &answers, cx)
+                    window.prompt(level, &message, detail, &answers(&keys), cx)
                 }) else {
                     return;
                 };
@@ -643,7 +686,7 @@ impl FolderView {
             let _ = this.update_in(cx, |view, window, cx| {
                 if view.plan_epoch != epoch {
                     view.notice = Some(
-                        "The folders changed while the question was open. Copy again to use the new view."
+                        tr("The folders changed while the question was open. Copy again to use the new view.")
                             .into(),
                     );
                     cx.notify();
@@ -701,12 +744,22 @@ impl FolderView {
             let (message, labels, picks) = match ask {
                 DeleteAsk::Choose => {
                     let (labels, picks) = delete_answers(&have);
-                    ("Move to the Recycle Bin?".to_owned(), labels, picks)
+                    (tr("Move to the Recycle Bin?").to_owned(), labels, picks)
                 }
-                DeleteAsk::Sides(_) => (message, vec!["Cancel", "Move to Recycle Bin"], vec![have]),
+                DeleteAsk::Sides(_) => (
+                    message,
+                    vec![tr_key("Cancel"), tr_key("Move to Recycle Bin")],
+                    vec![have],
+                ),
             };
             let Ok(answer) = this.update_in(cx, |_, window, cx| {
-                window.prompt(PromptLevel::Warning, &message, Some(&detail), &labels, cx)
+                window.prompt(
+                    PromptLevel::Warning,
+                    &message,
+                    Some(&detail),
+                    &answers(&labels),
+                    cx,
+                )
             }) else {
                 return;
             };
@@ -724,7 +777,9 @@ impl FolderView {
                 .flat_map(|(_, p)| p.paths.clone())
                 .collect();
             // Plan again on the worker: the disk may have moved on while the question was open.
-            let stale = "The folders changed while the question was open. Delete again to use the new view.";
+            let stale = tr(
+                "The folders changed while the question was open. Delete again to use the new view.",
+            );
             let still_current = this.update(cx, |view, _| view.plan_epoch == epoch);
             if !matches!(still_current, Ok(true)) {
                 let _ = this.update(cx, |view, cx| {
@@ -751,7 +806,9 @@ impl FolderView {
                 let notice = if view.plan_epoch != epoch || !inside_prompt {
                     Some(stale)
                 } else if fresh.is_empty() {
-                    Some("Nothing left to delete: the folders changed while the question was open.")
+                    Some(tr(
+                        "Nothing left to delete: the folders changed while the question was open.",
+                    ))
                 } else {
                     None
                 };
@@ -785,7 +842,7 @@ impl FolderView {
         }
         let total = paths.len();
         let (left, right) = (self.left.clone(), self.right.clone());
-        let (cancel, done) = self.start_batch("Deleting", total, cx);
+        let (cancel, done) = self.start_batch(tr_key("Deleting"), total, cx);
         cx.spawn_in(window, async move |this, cx| {
             let report = background
                 .spawn(
@@ -817,7 +874,7 @@ impl FolderView {
         let ex = expand(cmp, &model.picked(), &|n| model.passes_filters(n));
         let pairs = touch_pairs(cmp, &ex, from, &self.left, &self.right);
         if pairs.is_empty() {
-            self.notice = Some("Touch needs files that exist on both sides.".into());
+            self.notice = Some(tr("Touch needs files that exist on both sides.").into());
             cx.notify();
             return;
         }
@@ -826,7 +883,7 @@ impl FolderView {
             Side::Right => (Side::Left, self.left.clone()),
         };
         let total = pairs.len();
-        let (cancel, done) = self.start_batch("Touching", total, cx);
+        let (cancel, done) = self.start_batch(tr_key("Touching"), total, cx);
         let background = cx.background_executor().clone();
         cx.spawn_in(window, async move |this, cx| {
             let report = background
@@ -861,7 +918,7 @@ impl FolderView {
         }
         let (files, folders) = (batch.files.len(), batch.mkdirs.len());
         let total = files + folders;
-        let (cancel, done) = self.start_batch("Copying", total, cx);
+        let (cancel, done) = self.start_batch(tr_key("Copying"), total, cx);
         cx.spawn_in(window, async move |this, cx| {
             let report = background
                 .spawn(async move { run_copy(&dst_root, &batch, &cancel, &done) })

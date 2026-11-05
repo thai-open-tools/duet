@@ -16,8 +16,8 @@ use duet_core::text::rows::RowKind;
 use encoding_rs::Encoding;
 use gpui_component::highlighter::HighlightTheme;
 use gpui_kit::TestSupportExt as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
@@ -27,6 +27,7 @@ use gpui_kit::{
 };
 
 use crate::format::{count_of, format_size};
+use crate::i18n::{LiveText, live, tr, tr_key, trf};
 use crate::job::JobSlot;
 use crate::palette::Palette;
 use crate::probe::ScrollProbe;
@@ -38,8 +39,8 @@ use crate::text::editing::{RediffTimes, WAIT_NOTICE, carried_caret};
 use crate::text::find::{FindQuery, FindResult, FindScope, find, find_ticks};
 use crate::text::goto::parse_line;
 use crate::text::job::{
-    ENCODINGS, IgnoreChoice, TextOutcome, TextRequest, apply_ignore, encoding_text, next_encoding,
-    run,
+    IgnoreChoice, TextOutcome, TextRequest, apply_ignore, encoding_choices, encoding_text,
+    next_encoding, run,
 };
 use crate::text::menu::{
     AlignWithOtherSide, ClearAlignments, TreatAsUnimportant, path_actions, row_menu,
@@ -50,7 +51,9 @@ use crate::text::model::{
 use crate::text::moving::MoveDrag;
 use crate::text::overview::{display_at, marks};
 use crate::text::prefs::TextPrefs;
-use crate::text::report::{CopyPatch, ReportHtml, ReportPatch, ReportText};
+use crate::text::report::{
+    CopyPatch, ReportHtml, ReportLangEnglish, ReportLangThai, ReportPatch, ReportText,
+};
 use crate::text::rowsel::{RowDrag, RowSel};
 use crate::text::sides::SideEdit;
 use crate::text::syntax::{
@@ -62,9 +65,10 @@ use crate::text::watch::Watch;
 use crate::ui::drag::follow_drag;
 use crate::ui::fonts::{Fonts, UI_SIZE, code_advance_at};
 use crate::ui::menu::fill as fill_menu;
+use crate::ui::prose::ProseExt as _;
 use crate::ui::style::{
     LEGEND_MIN_WIDTH, LdExt as _, SCROLLBAR_WIDTH, ld_button, ld_gutter_button, legend, status_bar,
-    status_parts_row,
+    status_line_box, status_notice, status_parts_row,
 };
 use gpui_kit::{
     BorderStyle, ElementInputHandler, MouseButton, MouseDownEvent, MouseMoveEvent, Point, canvas,
@@ -74,6 +78,7 @@ use rows::{HalfText, RowFrame, half};
 use stage::{
     CENTRE_GUTTER, OVERVIEW_WIDTH, hscroll_skip, hscroll_thumb, stage_columns, view_columns,
 };
+use syntax_jobs::PLAIN_TEXT;
 
 actions!(
     text,
@@ -178,7 +183,7 @@ pub use toolbar::position_text;
 
 pub const CONTEXT: &str = "TextView";
 /// The find field's tooltip: what Enter and Shift+Enter do there.
-pub const FIND_TOOLTIP: &str = "Find text (Enter: next match, Shift+Enter: previous match)";
+pub const FIND_TOOLTIP: &str = tr_key("Find text (Enter: next match, Shift+Enter: previous match)");
 /// The code font's sizes the Font dropdown offers (R4); a saved size is clamped to their range.
 pub const FONT_SIZES: [f32; 13] = [
     9., 10., 11., 12., 12.5, 13., 14., 15., 16., 18., 20., 22., 24.,
@@ -289,9 +294,9 @@ impl EventEmitter<TextEvent> for TextView {}
 pub struct TextView {
     pub(crate) request: TextRequest,
     pub(crate) model: Option<TextModel>,
-    pub(crate) message: Option<SharedString>,
+    pub(crate) message: Option<LiveText>,
     /// What to do about `message`, shown under it in muted text.
-    message_hint: Option<SharedString>,
+    message_hint: Option<LiveText>,
     pub(crate) job: JobSlot,
     pub(crate) task: Option<Task<()>>,
     /// The row list and its scroll position: uniform unless wrapped (R2).
@@ -343,6 +348,8 @@ pub struct TextView {
     pub(crate) hscroll_grab: f32,
     /// A one-line note in the status bar, e.g. why a button did nothing.
     pub(crate) notice: Option<SharedString>,
+    /// The notice the "Still saving" refusal set, to tell it from a later one.
+    pub(crate) still_saving_notice: Option<SharedString>,
     /// The tab was opened from a folder compare: the toolbar shows Back (R13).
     has_origin: bool,
     /// The filter to restore when a large pair's model was released for a reload.
@@ -418,6 +425,8 @@ pub struct TextView {
     pub(crate) relex: [Option<Task<()>>; 2],
     /// Stops the reports still building when the tab closes.
     pub(crate) report_cancel: crate::text::report::ReportCancel,
+    /// The language picked in the Report menu; `None` follows the UI. Not saved.
+    pub(crate) report_lang: Option<crate::i18n::Lang>,
 }
 
 impl Focusable for TextView {
@@ -512,6 +521,7 @@ impl TextView {
             dragging_hscroll: false,
             hscroll_grab: 0.,
             notice: None,
+            still_saving_notice: None,
             has_origin: false,
             pending_filter: Some(prefs.filter.filter(prefs.context_lines)),
             mapped: [false; 2],
@@ -537,7 +547,7 @@ impl TextView {
             undo: UndoStack::default(),
             syntax: [None, None],
             syntax_on: prefs.syntax,
-            syntax_state: [SyntaxState::Off("plain text"); 2],
+            syntax_state: [SyntaxState::Off(PLAIN_TEXT); 2],
             syntax_job: Default::default(),
             syntax_swaps: 0,
             syntax_theme,
@@ -555,6 +565,7 @@ impl TextView {
             reformatting: None,
             relex: [None, None],
             report_cancel: Default::default(),
+            report_lang: None,
             prefs,
         };
         view.request.detect_moves = view.prefs.moves;
@@ -598,9 +609,9 @@ impl TextView {
         self.message_hint.as_deref()
     }
 
-    fn set_message(&mut self, title: impl Into<SharedString>, hint: &'static str) {
-        self.message = Some(title.into());
-        self.message_hint = Some(hint.into());
+    fn set_message(&mut self, title: LiveText, hint: &'static str) {
+        self.message = Some(title);
+        self.message_hint = Some(live(hint));
     }
 
     /// A compare runs or a re-diff is pending.
@@ -616,6 +627,39 @@ impl TextView {
         &self.request
     }
 
+    /// The language changed: a notice is one-shot feedback in the old language, so it goes and the
+    /// status falls back to what it works out. Later tasks rebuild what else is stored.
+    pub fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.notice = None;
+        if let Some(model) = &mut self.model {
+            model.relabel_notes();
+        }
+        for text in [&mut self.message, &mut self.message_hint]
+            .into_iter()
+            .flatten()
+        {
+            text.relabel();
+        }
+        if let Some(bar) = &mut self.find {
+            let (find, replace) = (bar.input.clone(), bar.replace.clone());
+            find.update(cx, |state, cx| {
+                state.set_placeholder(tr("Find text"), window, cx)
+            });
+            replace.update(cx, |state, cx| {
+                state.set_placeholder(tr("Replace with"), window, cx)
+            });
+        }
+        if let Some(bar) = &mut self.goto {
+            bar.error = None;
+            let input = bar.input.clone();
+            input.update(cx, |state, cx| {
+                state.set_placeholder(tr("Line number"), window, cx)
+            });
+        }
+        self.relabel_rules(window, cx);
+        cx.notify();
+    }
+
     pub fn notice(&self) -> Option<&str> {
         self.notice.as_deref()
     }
@@ -626,7 +670,7 @@ impl TextView {
         if let Some(notice) = &self.notice {
             notice.clone()
         } else if self.job.is_running() {
-            "Comparing… Press Esc to cancel.".into()
+            tr("Comparing… Press Esc to cancel.").into()
         } else {
             self.model
                 .as_ref()
@@ -748,11 +792,11 @@ fn clickable(half: Div, display: usize, left: bool, cx: &mut Context<TextView>) 
 }
 
 pub(crate) const BINARY_HINT: &str =
-    "These files are not text. Open a text pair, or press F5 to compare again.";
-const TOO_LARGE_AS_TEXT: &str = "Binary files over 64 MiB can't be opened as text.";
+    tr_key("These files are not text. Open a text pair, or press F5 to compare again.");
+const TOO_LARGE_AS_TEXT: &str = tr_key("Binary files over 64 MiB can't be opened as text.");
 const FAILED_HINT: &str =
-    "Check that both files exist and can be read, then press F5 to compare again.";
-const CANCELLED_HINT: &str = "Press F5 to compare again.";
+    tr_key("Check that both files exist and can be read, then press F5 to compare again.");
+const CANCELLED_HINT: &str = tr_key("Press F5 to compare again.");
 
 impl Render for TextView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -815,27 +859,27 @@ impl Render for TextView {
                         .test_support()
                         .text_size(px(15.))
                         .text_color(palette.text)
-                        .child(title.clone()),
+                        .prose(SharedString::from(title)),
                 )
-                .children(self.message_hint.clone().map(|hint| {
+                .children(self.message_hint.as_ref().map(|hint| {
                     div()
                         .id("text-message-hint")
                         .test_support()
                         .text_color(palette.muted)
-                        .child(hint)
+                        .prose(SharedString::from(hint))
                 }))
                 .children(self.is_binary_message().then(|| {
-                    ld_button("text-open-hex", "Open in hex", &palette).ld_click(
+                    ld_button("text-open-hex", tr("Open in hex"), &palette).ld_click(
                         true,
                         cx.listener(|this, _, _, cx| this.open_as(CompareKind::Hex, cx)),
                     )
                 }))
                 .children(self.is_binary_message().then(|| {
-                    ld_button("text-open-as-text", "Open as text", &palette)
+                    ld_button("text-open-as-text", tr("Open as text"), &palette)
                         .ld_click(true, cx.listener(|this, _, _, cx| this.open_as_text(cx)))
                 }))
                 .children((self.is_binary_message() && self.both_pictures()).then(|| {
-                    ld_button("text-open-picture", "Open as picture", &palette).ld_click(
+                    ld_button("text-open-picture", tr("Open as picture"), &palette).ld_click(
                         true,
                         cx.listener(|this, _, _, cx| this.open_as(CompareKind::Picture, cx)),
                     )
@@ -1066,6 +1110,12 @@ impl Render for TextView {
             )
             .on_action(cx.listener(|this, _: &ReportText, window, cx| this.report_text(window, cx)))
             .on_action(cx.listener(|this, _: &CopyPatch, _, cx| this.copy_patch(cx)))
+            .on_action(cx.listener(|this, _: &ReportLangThai, _, cx| {
+                this.set_report_lang(crate::i18n::Lang::Th, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ReportLangEnglish, _, cx| {
+                this.set_report_lang(crate::i18n::Lang::En, cx)
+            }))
             .on_action(cx.listener(|this, _: &CopyAllRight, _, cx| {
                 this.copy_all(false, cx);
             }))

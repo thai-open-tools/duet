@@ -30,7 +30,7 @@ def snap_centre(c, thick):
 def draw(size):
     """The icon at `size` px. Geometry is in a 512 grid, scaled, rounded, then mirrored."""
     k = size / 512
-    small = size <= 24
+    small = size <= 20
     inset = max(1, round((8 if small else 20) * k)) if size < 512 else 20
     radius = (80 if small else 92) * k
     thick = max(2, round((64 if small else 48) * k))
@@ -108,6 +108,13 @@ def main():
         im = draw(size)
         print(f"{size:>3} px  arrow margins left/right/top/bottom = {check(im)}")
         im.save(header / f"duet-{size}.png", optimize=True)
+    # A 24 px taskbar slot (100% display scale) shows either the 24 px frame or the window's
+    # 32 px one scaled down, so their arrows must look the same size.
+    def span(size):
+        left, _, top, _ = check(frames[size])
+        return (size - 2 * left) / size, (size - 2 * top) / size
+    for a, b in zip(span(24), span(32)):
+        assert abs(a - b) <= 0.06, f"24 px arrows {span(24)} against 32 px {span(32)}"
     big = draw(512)
     check(big)
     big.save(ASSETS / "duet-512.png")

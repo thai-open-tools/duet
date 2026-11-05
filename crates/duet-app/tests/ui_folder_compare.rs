@@ -10,8 +10,8 @@ use duet_app::app::layout_bindings;
 use duet_app::folder::model::{FolderFilter, SortKey};
 use duet_app::folder::prefs::Layout;
 use duet_app::folder::view::options::{
-    CriterionSize, ToggleConfirmCopy, ToggleEnterFolders, ToggleOddScan, criterion_menu,
-    options_menu,
+    CriterionSize, ToggleConfirmCopy, ToggleEnterFolders, ToggleFindMoves, ToggleOddScan,
+    criterion_menu, options_menu,
 };
 use duet_app::folder::view::{FolderEvent, FolderView};
 use duet_app::launch::Launch;
@@ -311,7 +311,7 @@ async fn count_line_endings_flips_similar_files_without_reading_again(cx: &mut T
 }
 
 #[gpui_kit::test]
-async fn the_options_menu_holds_three_settings_and_saves_them(cx: &mut TestAppContext) {
+async fn the_options_menu_holds_four_settings_and_saves_them(cx: &mut TestAppContext) {
     let data = use_settings(cx);
     let (l, r) = fixture();
     let (handle, view) = open_folder(cx, l.path(), r.path());
@@ -321,7 +321,8 @@ async fn the_options_menu_holds_three_settings_and_saves_them(cx: &mut TestAppCo
         [
             "● Look for invisible characters after a compare",
             "● Ask before copying",
-            "Double-click a folder to compare inside it"
+            "Double-click a folder to compare inside it",
+            "Find moved files"
         ]
     );
     dispatch(cx, handle, &view, ToggleOddScan);
@@ -334,6 +335,8 @@ async fn the_options_menu_holds_three_settings_and_saves_them(cx: &mut TestAppCo
     assert_eq!(saved_setting(&data, "folder.confirm_copy"), false);
     dispatch(cx, handle, &view, ToggleEnterFolders);
     assert_eq!(saved_setting(&data, "folder.double_click"), "enter");
+    dispatch(cx, handle, &view, ToggleFindMoves);
+    assert_eq!(saved_setting(&data, "folder.find_moves"), true);
 }
 
 #[gpui_kit::test]

@@ -8,6 +8,7 @@ use duet_core::text::merge::diff3::RegionKind;
 use duet_core::text::merge::session::{MergeSession, Resolution};
 
 use crate::format::count_of;
+use crate::i18n::{tr, tr_key, trf};
 
 /// A stable run longer than this folds to its first and last `FOLD_CONTEXT` lines.
 pub const FOLD_MIN: u32 = 9;
@@ -118,8 +119,8 @@ pub fn chunk_items(session: &MergeSession, chunk: usize, open: bool) -> Vec<Item
 /// "no lines", "line 5" or "3–7", in 1-based lines (`rangeText`).
 pub fn range_text(range: Range<u32>) -> String {
     match range.end.saturating_sub(range.start) {
-        0 => "no lines".to_owned(),
-        1 => format!("line {}", range.end),
+        0 => tr("no lines").to_owned(),
+        1 => trf("line {}", &[&range.end]),
         _ => format!("{}–{}", range.start + 1, range.end),
     }
 }
@@ -127,38 +128,38 @@ pub fn range_text(range: Range<u32>) -> String {
 /// Where a change sits in the base (`whereText`).
 pub fn where_text(base: Range<u32>) -> String {
     if base.end > base.start {
-        format!("Base {}", range_text(base))
+        trf("Base {}", &[&range_text(base)])
     } else if base.start > 0 {
-        format!("Inserted after base line {}", base.start)
+        trf("Inserted after base line {}", &[&base.start])
     } else {
-        "Inserted at the start of the file".to_owned()
+        tr("Inserted at the start of the file").to_owned()
     }
 }
 
 pub fn kind_badge(kind: RegionKind) -> &'static str {
     match kind {
         RegionKind::Stable => "",
-        RegionKind::Left => "Left changed",
-        RegionKind::Right => "Right changed",
-        RegionKind::Both => "Same change on both sides",
-        RegionKind::Conflict => "CONFLICT",
+        RegionKind::Left => tr_key("Left changed"),
+        RegionKind::Right => tr_key("Right changed"),
+        RegionKind::Both => tr_key("Same change on both sides"),
+        RegionKind::Conflict => tr_key("CONFLICT"),
     }
 }
 
 /// "Not resolved", or the choice with "(automatic)" when nobody made it (`stateHTML`).
 pub fn state_text(resolution: Option<&Resolution>) -> String {
     match resolution {
-        None => "Not resolved".to_owned(),
-        Some(r) if r.auto => format!("✓ {} (automatic)", r.how.label()),
-        Some(r) => format!("✓ {}", r.how.label()),
+        None => tr("Not resolved").to_owned(),
+        Some(r) if r.auto => trf("✓ {} (automatic)", &[&tr(r.how.label())]),
+        Some(r) => format!("✓ {}", tr(r.how.label())),
     }
 }
 
 /// The size of a part's result, beside its choice buttons (`resCountText`).
 pub fn count_text(resolution: Option<&Resolution>) -> String {
     match resolution {
-        None => "Not chosen yet".to_owned(),
-        Some(r) if r.lines.is_empty() => "Empty: no lines in the result".to_owned(),
+        None => tr("Not chosen yet").to_owned(),
+        Some(r) if r.lines.is_empty() => tr("Empty: no lines in the result").to_owned(),
         Some(r) => count_of(r.lines.len() as u64, "line", "lines"),
     }
 }
@@ -171,9 +172,9 @@ pub fn field_value(resolution: Option<&Resolution>) -> String {
 /// What an empty result field says (`taPlaceholder`).
 pub fn field_placeholder(resolved: bool) -> &'static str {
     if resolved {
-        "(empty: this part has no lines in the result)"
+        tr("(empty: this part has no lines in the result)")
     } else {
-        "Not resolved: press a button above, or type the result here"
+        tr("Not resolved: press a button above, or type the result here")
     }
 }
 

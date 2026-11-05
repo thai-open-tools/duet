@@ -88,21 +88,23 @@ pub enum SkipReason {
 impl SkipReason {
     pub fn text(&self) -> &'static str {
         match self {
-            SkipReason::Newer(Side::Right) => "the right is newer",
-            SkipReason::Newer(Side::Left) => "the left is newer",
-            SkipReason::SameTime => {
-                "the modified times are equal or near: can't tell which is newer"
+            SkipReason::Newer(Side::Right) => crate::i18n::tr_key("the right is newer"),
+            SkipReason::Newer(Side::Left) => crate::i18n::tr_key("the left is newer"),
+            SkipReason::SameTime => crate::i18n::tr_key(
+                "the modified times are equal or near: can't tell which is newer",
+            ),
+            SkipReason::CaseOnly => crate::i18n::tr_key(
+                "the names differ only in case and the contents match: rename it by hand",
+            ),
+            SkipReason::KeptFolder => crate::i18n::tr_key(
+                "holds files that are not in the compare (filtered out, links or unreadable): the folder stays",
+            ),
+            SkipReason::Changed => crate::i18n::tr_key("it changed on disk since the compare"),
+            SkipReason::Unreadable => crate::i18n::tr_key("it could not be read"),
+            SkipReason::Kind => {
+                crate::i18n::tr_key("a file on one side and a folder or link on the other")
             }
-            SkipReason::CaseOnly => {
-                "the names differ only in case and the contents match: rename it by hand"
-            }
-            SkipReason::KeptFolder => {
-                "holds files that are not in the compare (filtered out, links or unreadable): the folder stays"
-            }
-            SkipReason::Changed => "it changed on disk since the compare",
-            SkipReason::Unreadable => "it could not be read",
-            SkipReason::Kind => "a file on one side and a folder or link on the other",
-            SkipReason::Link => "links are never copied",
+            SkipReason::Link => crate::i18n::tr_key("links are never copied"),
         }
     }
 
@@ -110,12 +112,12 @@ impl SkipReason {
     /// a case-only pair is said to match in what they compared, not in its contents (PF13).
     pub fn text_in(&self, mode: CompareMode) -> &'static str {
         match (self, mode) {
-            (SkipReason::CaseOnly, CompareMode::Quick) => {
-                "the names differ only in case and the size and modified time match: rename it by hand"
-            }
-            (SkipReason::CaseOnly, CompareMode::Size) => {
-                "the names differ only in case and the size matches: rename it by hand"
-            }
+            (SkipReason::CaseOnly, CompareMode::Quick) => crate::i18n::tr_key(
+                "the names differ only in case and the size and modified time match: rename it by hand",
+            ),
+            (SkipReason::CaseOnly, CompareMode::Size) => crate::i18n::tr_key(
+                "the names differ only in case and the size matches: rename it by hand",
+            ),
             _ => self.text(),
         }
     }
@@ -196,6 +198,9 @@ pub struct SyncPlan {
     /// The items of the scope left alone because they changed on disk since the compare (each
     /// is also a Changed skip).
     pub changed: Vec<PathBuf>,
+    /// Pairs the plan treats as a move: the `rel` of a file it copies to the `rel` of its twin
+    /// it sends to the Recycle Bin, and the reverse. For the preview's wording only.
+    pub moves: BTreeMap<String, String>,
 }
 
 impl SyncPlan {
@@ -265,7 +270,7 @@ fn entries(node: &Node) -> impl Iterator<Item = &Entry> {
 }
 
 /// Some side could not be read: an error row, an entry with an error, or one of unknown kind.
-fn unreadable(node: &Node) -> bool {
+pub(super) fn unreadable(node: &Node) -> bool {
     matches!(node.status, Status::Error(_))
         || entries(node).any(|e| e.error.is_some() || e.kind == EntryKind::Unknown)
 }
@@ -613,8 +618,48 @@ pub fn sync_plan_with_cancel(
         }
         plan.trash = found.paths;
         plan.trash_side = Some(side);
+        plan.moves = planned_moves(cmp, &plan, side, left_root, right_root);
     }
     Ok(plan)
+}
+
+/// The moved pairs of `cmp` whose one file the plan copies and whose twin it trashes.
+fn planned_moves(
+    cmp: &FolderComparison,
+    plan: &SyncPlan,
+    trash_side: Side,
+    left_root: &Path,
+    right_root: &Path,
+) -> BTreeMap<String, String> {
+    let mut moves = BTreeMap::new();
+    if cmp.moved.is_empty() {
+        return moves;
+    }
+    let copied: HashSet<&Path> = plan
+        .batches()
+        .iter()
+        .flat_map(|b| b.files.iter().map(|item| item.dst.as_path()))
+        .collect();
+    let trashed: HashSet<&Path> = plan.trash.iter().map(PathBuf::as_path).collect();
+    let copy_side = match trash_side {
+        Side::Left => Side::Right,
+        Side::Right => Side::Left,
+    };
+    // The copy lands on the side whose twin goes to the Recycle Bin.
+    let trash_root = root_of(trash_side, left_root, right_root);
+    for (&a, &b) in &cmp.moved {
+        let (Some(from), Some(twin)) = (entry_on(cmp, a, copy_side), entry_on(cmp, b, trash_side))
+        else {
+            continue;
+        };
+        let landed = join_rel(trash_root, &from.rel);
+        let gone = join_rel(trash_root, &twin.rel);
+        if copied.contains(landed.as_path()) && gone.ancestors().any(|p| trashed.contains(p)) {
+            moves.insert(from.rel.clone(), twin.rel.clone());
+            moves.insert(twin.rel.clone(), from.rel.clone());
+        }
+    }
+    moves
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -662,7 +707,7 @@ pub fn run_sync(
         let refused = BatchReport {
             failed: vec![(
                 right_root.to_path_buf(),
-                "one folder is inside the other, so nothing was synced".into(),
+                crate::i18n::tr_key("one folder is inside the other, so nothing was synced").into(),
             )],
             ..BatchReport::default()
         };

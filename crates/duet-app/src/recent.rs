@@ -5,6 +5,8 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::i18n::{tr, trf};
+
 pub const MAX_RECENT: usize = 40;
 
 /// What a recent pair opens as: tags `F` (folders), `T` (text files), `H` (hex), `C` (table),
@@ -46,12 +48,12 @@ impl RecentKind {
     /// The word the Start screen shows.
     pub fn label(self) -> &'static str {
         match self {
-            RecentKind::Folders => "Folders",
-            RecentKind::Files => "Files",
-            RecentKind::Hex => "Hex",
-            RecentKind::Table => "Table",
-            RecentKind::Picture => "Picture",
-            RecentKind::Merge => "Merge",
+            RecentKind::Folders => tr("Folders"),
+            RecentKind::Files => tr("Files"),
+            RecentKind::Hex => tr("Hex"),
+            RecentKind::Table => tr("Table"),
+            RecentKind::Picture => tr("Picture"),
+            RecentKind::Merge => tr("Merge"),
         }
     }
 }
@@ -91,7 +93,7 @@ impl Recent {
         };
         let mut names = format!("{} ↔ {}", name(&self.left), name(&self.right));
         if let Some(base) = &self.base {
-            names.push_str(&format!(" · base {}", name(base)));
+            names.push_str(&trf(" · base {}", &[&name(base)]));
         }
         // Windows paths compare without regard to case.
         let mut places: Vec<String> = Vec::new();
@@ -114,6 +116,40 @@ impl Recent {
             .collect::<Vec<_>>()
             .join("\n")
     }
+}
+
+/// True when `path` lives under `temp`, compared per component without regard to case.
+fn under(path: &Path, temp: &Path) -> bool {
+    let parts = |p: &Path| -> Vec<String> {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect()
+    };
+    let (path, temp) = (parts(path), parts(temp));
+    !temp.is_empty() && path.len() > temp.len() && path[..temp.len()] == temp[..]
+}
+
+/// git's merge temp files: `<name>_LOCAL_<digits>`, `_REMOTE_` or `_BASE_`, then the extension.
+fn is_git_merge_temp(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    ["_LOCAL_", "_REMOTE_", "_BASE_"].iter().any(|tag| {
+        name.rfind(tag).is_some_and(|at| {
+            let rest = &name[at + tag.len()..];
+            let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+            digits > 0 && (digits == rest.len() || rest[digits..].starts_with('.'))
+        })
+    })
+}
+
+/// A pair that should not be remembered: a side under `temp` (the temp folder; None skips that
+/// test), or, for a merge, a side named like git's merge temp files.
+pub fn is_throwaway(entry: &Recent, temp: Option<&Path>) -> bool {
+    entry.paths().any(|path| {
+        temp.is_some_and(|temp| under(path, temp))
+            || (entry.kind == RecentKind::Merge && is_git_merge_temp(path))
+    })
 }
 
 /// Broken lines are skipped; at most 40 entries are kept.
@@ -227,6 +263,65 @@ mod tests {
             right: right.into(),
             base: None,
         }
+    }
+
+    #[test]
+    fn temp_and_git_merge_files_are_throwaway() {
+        let temp = Path::new(r"C:\Users\me\AppData\Local\Temp");
+        let entry = |kind, left: &str, right: &str, base: Option<&str>| Recent {
+            kind,
+            left: left.into(),
+            right: right.into(),
+            base: base.map(PathBuf::from),
+        };
+        let real = r"C:\work\a.txt";
+        let under = r"c:\users\ME\appdata\local\temp\duet-empty-side\no file";
+        assert!(is_throwaway(
+            &entry(RecentKind::Files, real, under, None),
+            Some(temp)
+        ));
+        assert!(is_throwaway(
+            &entry(RecentKind::Files, under, real, None),
+            Some(temp)
+        ));
+        assert!(!is_throwaway(
+            &entry(RecentKind::Files, real, real, None),
+            Some(temp)
+        ));
+        assert!(!is_throwaway(
+            &entry(RecentKind::Files, real, under, None),
+            None
+        ));
+        // The temp folder itself and a sibling with the same start are not "under" it.
+        assert!(!under_check(r"C:\Users\me\AppData\Local\Temp", temp));
+        assert!(!under_check(r"C:\Users\me\AppData\Local\Temp2\x", temp));
+        for name in [
+            r"C:\repo\a_LOCAL_1234.txt",
+            r"C:\repo\a_REMOTE_99.txt",
+            r"C:\repo\a_BASE_7",
+            r"C:\repo\dir\my_file_LOCAL_12345.rs",
+        ] {
+            let merge = entry(RecentKind::Merge, name, real, Some(real));
+            assert!(is_throwaway(&merge, None), "{name}");
+            assert!(!is_throwaway(
+                &entry(RecentKind::Files, name, real, None),
+                None
+            ));
+        }
+        for name in [
+            r"C:\repo\a_LOCAL_.txt",
+            r"C:\repo\a_LOCAL_x1.txt",
+            r"C:\repo\a_LOCAL_12x.txt",
+            r"C:\repo\a_local_12.txt",
+            r"C:\repo\LOCAL_12.txt",
+        ] {
+            let merge = entry(RecentKind::Merge, name, real, Some(real));
+            assert!(!is_throwaway(&merge, None), "{name}");
+        }
+    }
+
+    fn under_check(path: &str, temp: &Path) -> bool {
+        under(Path::new(path), temp)
     }
 
     #[test]

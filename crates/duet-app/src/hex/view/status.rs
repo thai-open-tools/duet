@@ -6,9 +6,10 @@ use duet_core::hex::format::format_offset;
 
 use super::*;
 use crate::format::{count_of, format_size, human_size};
+use crate::i18n::{tr, tr_key, trf};
 use crate::pathbar::{path_bar_click, path_input};
 use crate::status::{StatusPart, Tone};
-use crate::ui::style::{status_bar, status_parts_row};
+use crate::ui::style::{status_bar, status_line_box, status_notice, status_parts_row};
 use gpui_kit::ClickEvent;
 
 /// `done` of `total` as 0 to 99: a job shows 100 only by ending.
@@ -22,7 +23,7 @@ fn percent(done: &AtomicU64, total: u64) -> u64 {
 
 /// What the file bar shows for a side: "1.5 KiB (1,536 bytes)".
 fn size_text(bytes: u64) -> String {
-    format!("{} ({} bytes)", human_size(bytes), format_size(bytes))
+    trf("{} ({} bytes)", &[&human_size(bytes), &format_size(bytes)])
 }
 
 impl HexView {
@@ -33,37 +34,39 @@ impl HexView {
         };
         let (left, right) = (pair.left.len(), pair.right.len());
         let mut parts = vec![
-            StatusPart::new(format!("Left: {}", human_size(left)), Tone::Muted),
-            StatusPart::new(format!("Right: {}", human_size(right)), Tone::Muted),
+            StatusPart::new(trf("Left: {}", &[&human_size(left)]), Tone::Muted),
+            StatusPart::new(trf("Right: {}", &[&human_size(right)]), Tone::Muted),
         ];
         if left != right {
             let (more, side) = if left > right {
-                (left - right, "left")
+                (left - right, tr_key("left"))
             } else {
-                (right - left, "right")
+                (right - left, tr_key("right"))
             };
             parts.push(StatusPart::new(
-                format!(
-                    "Sizes differ by {} ({side} is longer)",
-                    count_of(more, "byte", "bytes")
+                trf(
+                    "Sizes differ by {} ({} is longer)",
+                    &[&count_of(more, "byte", "bytes"), &tr(side)],
                 ),
                 Tone::Changed,
             ));
         }
         match &self.diff {
             _ if self.is_busy() => parts.push(StatusPart::new(
-                format!("Comparing… {}%", self.progress_percent()),
+                trf("Comparing… {}%", &[&self.progress_percent()]),
                 Tone::Muted,
             )),
             Some(diff) if diff.diff_bytes == 0 => {
-                parts.push(StatusPart::new("Identical byte for byte.", Tone::Muted))
+                parts.push(StatusPart::new(tr("Identical byte for byte."), Tone::Muted))
             }
             Some(diff) => parts.push(StatusPart::new(
-                format!(
+                trf(
                     "Different bytes: {} · Differences: {} ({})",
-                    format_size(diff.diff_bytes),
-                    format_size(self.blocks.len() as u64),
-                    count_of(diff.ranges.len() as u64, "run", "runs"),
+                    &[
+                        &format_size(diff.diff_bytes),
+                        &format_size(self.blocks.len() as u64),
+                        &count_of(diff.ranges.len() as u64, "run", "runs"),
+                    ],
                 ),
                 Tone::Changed,
             )),
@@ -71,19 +74,19 @@ impl HexView {
         }
         if self.is_finding() {
             parts.push(StatusPart::new(
-                format!(
+                trf(
                     "Searching… {}%",
-                    percent(&self.find_progress, self.find_total)
+                    &[&percent(&self.find_progress, self.find_total)],
                 ),
                 Tone::Muted,
             ));
         }
         if self.diff.as_ref().is_some_and(|d| d.truncated) {
-            parts.push(StatusPart::new(TRUNCATED_NOTICE, Tone::Changed));
+            parts.push(StatusPart::new(tr(TRUNCATED_NOTICE), Tone::Changed));
         }
         if self.cancelled {
             parts.push(StatusPart::new(
-                "Cancelled: the result is incomplete.",
+                tr("Cancelled: the result is incomplete."),
                 Tone::Changed,
             ));
         }
@@ -94,9 +97,9 @@ impl HexView {
             && range.end - range.start > 1
         {
             parts.push(StatusPart::new(
-                format!(
+                trf(
                     "{} selected",
-                    count_of(range.end - range.start, "byte", "bytes")
+                    &[&count_of(range.end - range.start, "byte", "bytes")],
                 ),
                 Tone::Accent,
             ));
@@ -117,12 +120,14 @@ impl HexView {
                 .map_or("--".to_owned(), |b| format!("{b:02X}"))
         };
         Some(StatusPart::new(
-            format!(
+            trf(
                 "Offset 0x{} ({}) · left {} right {}",
-                format_offset(offset, pair.max_len() - 1),
-                format_size(offset),
-                byte(&pair.left),
-                byte(&pair.right),
+                &[
+                    &format_offset(offset, pair.max_len() - 1),
+                    &format_size(offset),
+                    &byte(&pair.left),
+                    &byte(&pair.right),
+                ],
             ),
             Tone::Text,
         ))
@@ -140,9 +145,9 @@ impl HexView {
 
     pub(super) fn render_status(&self, p: &Palette) -> impl IntoElement {
         let line = match (&self.notice, self.pair.is_some()) {
-            (Some(notice), _) => div().child(notice.clone()).text_color(p.text),
-            (None, true) => status_parts_row(&self.status_parts(), p),
-            (None, false) => div(),
+            (Some(notice), _) => status_notice("hex-status-text", notice.clone(), p),
+            (None, true) => status_parts_row("hex-status-text", &self.status_parts(), p),
+            (None, false) => status_line_box("hex-status-text", "", ""),
         };
         status_bar("hex-status", p).child(line)
     }
@@ -151,9 +156,9 @@ impl HexView {
     pub(super) fn render_files(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         let side = |left: bool| {
             let (tag, path, size_id): (_, &Path, _) = if left {
-                ("Left", &self.left, "hex-left-size")
+                (tr("Left"), &self.left, "hex-left-size")
             } else {
-                ("Right", &self.right, "hex-right-size")
+                (tr("Right"), &self.right, "hex-right-size")
             };
             let id = if left {
                 "hex-left-path"

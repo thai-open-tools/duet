@@ -92,6 +92,7 @@ impl TablePrefs {
                 ignore_case: self.ignore_case,
                 trim: self.trim,
                 numbers: self.numbers,
+                ..CellRules::default()
             },
         }
     }

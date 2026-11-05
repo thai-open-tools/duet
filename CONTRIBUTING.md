@@ -6,8 +6,8 @@ Thank you for helping. Bug reports, ideas, documentation fixes and code are all 
 
 ## Before you write code
 
-Open a card first ([bug](https://github.com/ball46/duet/issues/new?template=bug_report.yml) or
-[feature](https://github.com/ball46/duet/issues/new?template=feature_request.yml)) and say you would like
+Open a card first ([bug](https://github.com/thai-open-tools/duet/issues/new?template=bug_report.yml) or
+[feature](https://github.com/thai-open-tools/duet/issues/new?template=feature_request.yml)) and say you would like
 to work on it. A short talk about the approach saves a rewrite later. Small fixes (a typo, an obvious bug)
 can go straight to a pull request.
 
@@ -19,7 +19,7 @@ can go straight to a pull request.
 4. For `scripts\check.ps1`: `cargo install cargo-deny`.
 
 ```powershell
-git clone https://github.com/ball46/duet.git
+git clone https://github.com/thai-open-tools/duet.git
 cd duet
 cargo run --release -p duet-app          # the app
 cargo run --release -p duet-cli -- a b   # the command line
@@ -74,8 +74,8 @@ By sending a contribution you agree that it is released under the project's [MIT
 
 ### ก่อนเริ่มเขียนโค้ด
 
-ให้เปิด issue ก่อน ([บั๊ก](https://github.com/ball46/duet/issues/new?template=bug_report.yml) หรือ
-[ฟีเจอร์](https://github.com/ball46/duet/issues/new?template=feature_request.yml)) แล้วบอกว่าอยากทำเรื่องนี้
+ให้เปิด issue ก่อน ([บั๊ก](https://github.com/thai-open-tools/duet/issues/new?template=bug_report.yml) หรือ
+[ฟีเจอร์](https://github.com/thai-open-tools/duet/issues/new?template=feature_request.yml)) แล้วบอกว่าอยากทำเรื่องนี้
 คุยแนวทางกันสั้นๆ ก่อนจะช่วยไม่ให้ต้องรื้อทำใหม่ ส่วนการแก้เล็กๆ เช่น คำผิดหรือบั๊กที่เห็นชัด ส่ง pull request มาได้เลย
 
 ### เตรียมเครื่อง
@@ -86,7 +86,7 @@ By sending a contribution you agree that it is released under the project's [MIT
 4. สำหรับ `scripts\check.ps1` ให้ติดตั้ง cargo-deny ด้วย `cargo install cargo-deny`
 
 ```powershell
-git clone https://github.com/ball46/duet.git
+git clone https://github.com/thai-open-tools/duet.git
 cd duet
 cargo run --release -p duet-app          # เปิดตัวโปรแกรม
 cargo run --release -p duet-cli -- a b   # ใช้ผ่าน command line

@@ -119,4 +119,27 @@ mod tests {
             Status::Different { .. }
         ));
     }
+
+    #[test]
+    fn the_first_pass_finds_no_moves() {
+        let (l, r) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        put(&l.path().join("a.txt"), "same bytes");
+        put(&r.path().join("b.txt"), "same bytes");
+        let opts = FolderOptions {
+            mode: CompareMode::Content,
+            find_moves: true,
+            ..FolderOptions::default()
+        };
+        let first = shallow(l.path(), r.path(), &opts).unwrap();
+        assert!(first.moved.is_empty());
+        let full = duet_core::folder::run::compare_folders(
+            l.path(),
+            r.path(),
+            &opts,
+            &duet_core::folder::run::FolderProgress::default(),
+            &duet_core::cancel::CancelToken::new(),
+        )
+        .unwrap();
+        assert_eq!(full.moved_files(), 1, "only the full compare looks");
+    }
 }

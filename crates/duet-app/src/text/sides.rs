@@ -11,12 +11,13 @@ use gpui_kit::{App, Context, ExternalPaths, PathPromptOptions, ScrollStrategy, W
 
 use super::view::stage::{OVERVIEW_WIDTH, stage_columns};
 use super::view::{TextEvent, TextView};
+use crate::i18n::{tr, tr_key};
 use crate::pathbar::{self, ActiveEdit, dropped_files, typed_file};
 use crate::text::caret::Caret;
 use crate::text::editing::{WAIT_NOTICE, normalize_breaks};
 use crate::text::job::TextRequest;
 
-const NO_CLIPBOARD_TEXT: &str = "The clipboard has no text.";
+const NO_CLIPBOARD_TEXT: &str = tr_key("The clipboard has no text.");
 
 /// A path box being typed into, with what ends it.
 pub(crate) type SideEdit = ActiveEdit;
@@ -243,12 +244,12 @@ impl TextView {
             .and_then(|item| item.text())
             .filter(|text| !text.is_empty())
         else {
-            self.notice = Some(NO_CLIPBOARD_TEXT.into());
+            self.notice = Some(tr(NO_CLIPBOARD_TEXT).into());
             cx.notify();
             return false;
         };
         if self.job.is_running() {
-            self.notice = Some(WAIT_NOTICE.into());
+            self.notice = Some(tr(WAIT_NOTICE).into());
             cx.notify();
             return false;
         }

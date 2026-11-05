@@ -6,7 +6,8 @@
 </p>
 
 <p align="center">
-  <b>English</b> · <a href="README.th.md">ภาษาไทย</a>
+  <b>English</b> · <a href="README.th.md">ภาษาไทย</a><br>
+  ใช้งานเป็นภาษาไทยได้ทั้งโปรแกรม คู่มือ และรายงาน <a href="README.th.md">อ่านแนะนำภาษาไทยที่นี่</a>
 </p>
 
 <p align="center">
@@ -19,13 +20,13 @@
   <img alt="Windows 10 and 11, x64" src="https://img.shields.io/badge/Windows%2010%20%C2%B7%2011-x64-0078d4?style=flat-square&logo=windows11&logoColor=white">
   <img alt="100% Rust" src="https://img.shields.io/badge/100%25-Rust-b7410e?style=flat-square&logo=rust">
   <img alt="Works offline" src="https://img.shields.io/badge/network-none-2e7d32?style=flat-square">
-  <img alt="Thai and English" src="https://img.shields.io/badge/UI%20help-ไทย%20%C2%B7%20English-e0aa4a?style=flat-square">
+  <img alt="Program, guide and reports in Thai and English" src="https://img.shields.io/badge/UI%20%C2%B7%20help%20%C2%B7%20reports-ไทย%20%C2%B7%20English-e0aa4a?style=flat-square">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-3a3a3a?style=flat-square"></a>
-  <img alt="Status: early release" src="https://img.shields.io/badge/status-0.1%20early-d69e2e?style=flat-square">
+  <img alt="Status: early release" src="https://img.shields.io/badge/status-0.2%20early-d69e2e?style=flat-square">
 </p>
 
 <p align="center">
-  <a href="https://github.com/ball46/duet/releases/latest"><b>⬇ Download for Windows</b></a> ·
+  <a href="https://github.com/thai-open-tools/duet/releases/latest"><b>⬇ Download for Windows</b></a> ·
   <a href="#report-a-bug-or-ask-for-a-feature">Report a bug</a> ·
   <a href="#report-a-bug-or-ask-for-a-feature">Ask for a feature</a> ·
   <a href="#build-from-source">Build from source</a>
@@ -49,6 +50,7 @@
   <a href="#details-that-save-you-a-bad-day">Details</a> ·
   <a href="#download-and-install">Install</a> ·
   <a href="#command-line">Command line</a> ·
+  <a href="#use-duet-from-git">Git and Explorer</a> ·
   <a href="#report-a-bug-or-ask-for-a-feature">Issues</a> ·
   <a href="#faq">FAQ</a>
 </p>
@@ -71,7 +73,7 @@
     </td>
     <td width="25%" valign="top">
       <h3>🔒 Offline, fast, Thai-ready</h3>
-      No network code at all. Opens big files quickly, reads Thai in UTF-8 or windows-874, and ships its guide in Thai and English.
+      No network code at all. Opens big files quickly, reads Thai in UTF-8 or windows-874, and runs in Thai or English, guide and reports included.
     </td>
   </tr>
 </table>
@@ -89,7 +91,7 @@ compare is **easier to do and clearer to read**:
 - **Moves, not just deletes.** A block that moved shows in blue with the line number on the other side. Click to jump there, drag to move it.
 - **Reports you can share.** HTML, Excel, text and CSV, with your own names for each side (say *UAT* and *PROD*), and values that look like passwords or private keys masked before the report leaves your team.
 - **A sync you can read first.** Every copy and delete is listed before you press Start, and deletes go to the Recycle Bin.
-- **Thai, properly.** Thai text in UTF-8 or windows-874 is detected and shown correctly, and the built-in guide reads in Thai or English.
+- **Thai, properly.** Thai text in UTF-8 or windows-874 is detected and shown correctly, and the whole program, its guide and its reports run in Thai or English, one language at a time.
 
 **Where the name comes from.** A duet is two performers on one piece of music. That is the idea of this
 tool: it sets two sides next to each other, so you see at once where they part ways. The full name is
@@ -123,7 +125,8 @@ type two paths, or pick a tile on the Start tab.
 </p>
 
 - Four ways to decide two files match: **Quick** (size and time, reads nothing), **Content** (bytes), **Size only**, or **Content by the text compare rules** (so a file that differs only in ignored parts shows ≈).
-- Chips for **All, Mismatched, Changed, Left only, Right only, Same**; a tree or a flat sortable list; counts per folder.
+- Chips for **All, Mismatched, Changed, Left only, Right only, Moved, Same**; a tree or a flat sortable list; counts per folder.
+- **Moved files.** A left-only and a right-only file with the same bytes are tagged as moved, when the criterion reads contents. Both rows stay where they are, each tagged with the other path, and a click on the tag jumps there. *Find moved files* in the Options menu turns it off.
 - Include and exclude masks (`*.xml; target; /web.config`), a path filter, and *Exclude this item* from the right-click menu.
 - Copy either way (keeping modified times), delete to the Recycle Bin, set times, and **sync** in five modes (update right, left or both; mirror right or left) with a full preview.
 - **Reports** in HTML, Excel (.xlsx, with a *Result* column for team review), text and CSV, with the differing lines of each file if you want them. [See what each one looks like](#reports-you-can-hand-to-someone).
@@ -155,6 +158,8 @@ type two paths, or pick a tile on the Start tab.
 - CSV and TSV cell by cell; the delimiter is detected (comma, tab, semicolon or pipe).
 - Columns pair by header name; **key columns** pair rows by ID even when their order differs.
 - Ignore case, trim spaces, and compare numbers by value (so `1.0` equals `1`). Export the differences as CSV or HTML.
+- Excel `.xlsx` and `.xlsm`, read-only: pick the sheet on each side, and formulas compare by their saved result. Cells show their stored value, not Excel's format (a 25% cell shows `0.25`), and dates show as ISO text (`2024-03-05`). When both sides are workbooks, a text cell that looks like a number or a date shows with a leading `'`, like Excel's own notation, so the text `1` differs from the number `1`; beside a CSV file the `'` is left off, since a CSV has no cell types.
+- duet does not save back to `.xlsx`: export stays CSV or HTML. A folder compare still compares the bytes of two workbooks, and Excel rewrites a file on every save, so open the pair as a table to see whether the cells differ.
 
 ### Pictures
 
@@ -197,6 +202,12 @@ change number, and choose the scope: all items, what the filter shows now, or on
 | Feed another program or your own script | **CSV** | One row per file, ready to filter |
 
 The pictures and samples below come from real reports of the made-up shop release the other pictures on this page use.
+
+**Thai or English.** The program and its reports come in both, one language at a time. `ไทย | EN` in the
+window's header switches the whole program at once. A report has its own choice, **Report language** in the
+folder report panel and the language items in the text and table report menus, so a Thai window can write an
+English report and the other way round. The samples below are English; a Thai report has the same layout, with
+its column names and status words in Thai. Choose English if a script reads the file.
 
 ### HTML: the one to send
 
@@ -311,7 +322,7 @@ picture tab exports a difference image.
 
 ## Download and install
 
-**[Download the latest release](https://github.com/ball46/duet/releases/latest)** and pick one:
+**[Download the latest release](https://github.com/thai-open-tools/duet/releases/latest)** and pick one:
 
 | File | For |
 |---|---|
@@ -325,9 +336,9 @@ emulation; that is not tested yet, so a card telling how it went is welcome.
 No other software is needed. macOS and Linux are not supported yet; see the [roadmap](#roadmap).
 
 > [!IMPORTANT]
-> The 0.1 builds are not code-signed yet, so Windows SmartScreen may say *Windows protected your PC*.
+> These builds are not code-signed yet, so Windows SmartScreen may say *Windows protected your PC*.
 > Choose **More info**, check that the file name matches the one you downloaded, then **Run anyway**.
-> You can compare the file's SHA-256 with `SHA256SUMS.txt` first: `Get-FileHash .\duet-0.1.1-setup-x64.exe`.
+> You can compare the file's SHA-256 with `SHA256SUMS.txt` first: `Get-FileHash .\duet-0.2.0-setup-x64.exe`.
 
 Your settings, the recent list and the theme live in `%LOCALAPPDATA%\duet`. Uninstalling leaves
 them, so a reinstall picks up where you left off; delete that folder to start fresh.
@@ -338,6 +349,21 @@ them, so a reinstall picks up where you left off; delete that folder to start fr
 duet LEFT RIGHT                  compare two files or two folders in the app
 duet --table LEFT RIGHT          open two files as tables
 duet LEFT RIGHT BASE [OUTPUT]    3-way merge; save the result to OUTPUT if given
+duet --select-left PATH          remember PATH as the left side, then exit (no window opens)
+duet --compare-to PATH           compare PATH with the remembered left side
+duet --register-shell            add the Explorer right-click verbs for this duet.exe
+duet --unregister-shell          remove them again
+```
+
+The last four are what the [git and Explorer](#use-duet-from-git) sections below use. They print
+nothing: `duet.exe` has no console, so `--register-shell` and `--unregister-shell` tell you only
+through their exit code (0 worked, 1 failed) and the log in `%LOCALAPPDATA%\duet\logs`. In
+PowerShell, `&` does not wait for a window-less GUI program, so read the code like this, from the
+folder that holds `duet.exe` (write `.\duet`: a bare `duet` does not search the current folder and
+would run a copy installed on your PATH instead):
+
+```powershell
+(Start-Process .\duet -ArgumentList '--register-shell' -Wait -PassThru).ExitCode
 ```
 
 `duet-cli` compares in a terminal or a script, with no window:
@@ -351,13 +377,77 @@ It exits with **0** when the two sides are identical, **1** when they differ and
 so a script can act on the result. `duet-cli --help` lists every option, such as the time
 tolerance for quick folder compares.
 
+## Use duet from git
+
+Put this in your `.gitconfig`:
+
+```ini
+[diff]
+    tool = duet
+[difftool "duet"]
+    cmd = duet "$LOCAL" "$REMOTE"
+[difftool]
+    prompt = false
+[merge]
+    tool = duet
+[mergetool "duet"]
+    cmd = duet "$LOCAL" "$REMOTE" "$BASE" "$MERGED"
+    trustExitCode = false
+[mergetool]
+    keepBackup = false
+```
+
+Then `git difftool` opens duet on a changed file, and `git mergetool` opens the 3-way merge on a
+conflict, with the result going to the file git is merging.
+
+- **`duet` must be found on your PATH.** The installer's *Add duet-cli to PATH* option does it (it
+  is off by default; it adds the install folder, which holds `duet.exe` too). Otherwise write the
+  full path of `duet.exe` in place of `duet` in the two `cmd` lines.
+- `prompt = false` stops git asking before each file. `keepBackup = false` stops git leaving a
+  `.orig` copy of the file after a merge. `trustExitCode = false` makes git check whether you saved:
+  if you close the window without saving, git says the file seems unchanged and asks if the merge
+  was successful; answer `n`, because `y` marks the file resolved with the conflict markers still
+  in it. After *Save result* git carries on without a question.
+- Tried with git for Windows and the installed duet: `git difftool` on a changed file, on a name
+  with spaces and Thai letters, and with `--dir-diff` (one folder compare); `git mergetool` on a
+  conflict with a common ancestor and on one without (two unrelated histories); *Use left* and
+  *Save result* write the merged file and git carries on. Git waits until you close the window.
+
+## Use duet from Explorer
+
+Two verbs on the right-click menu of a file or a folder:
+
+- **Select as left** remembers the item as the left side. It shows nothing: no window, no sound,
+  no message. You only see that it worked when the next verb opens.
+- **Compare to selected left** compares the remembered item with the one you clicked, and forgets
+  it. Each use opens a **new duet window**, not a tab in one that is already open.
+
+Nothing remembered, or the remembered item has been deleted since? Then it opens the Start tab with
+this item in the left box (for a deleted one, with a line naming it). A file against a folder gets
+the usual "Cannot compare a file with a folder." The verbs are hidden when more than one item is
+selected.
+
+- **Installer:** the *Add "Select as left" and "Compare to selected left" to the Explorer
+  right-click menu* task is on by default, and uninstalling removes the verbs. They need no shell
+  extension. A per-user install registers them for your account only, with no administrator rights;
+  an all-users install registers them for everyone. `--unregister-shell` removes only your own
+  account's verbs, so an all-users install's verbs go when it is uninstalled. A per-user
+  registration takes priority over an all-users one, and uninstalling a per-user install also
+  removes a portable copy's verbs, since they share key names.
+- **Portable zip:** run `.\duet --register-shell` once from the folder you keep `duet.exe` in, and
+  `.\duet --unregister-shell` before you delete that folder. Moving `duet.exe` means registering
+  again. An installed copy and a portable copy use the same menu entries, so the one registered
+  last is the one that runs.
+- **Windows 11:** the verbs sit under **Show more options** (or Shift+F10), the classic menu. The
+  new short menu only takes entries from a signed app package, and duet is not signed yet.
+
 ## Build from source
 
 You need Windows 10 or 11 (x64), [Rust](https://rustup.rs/) 1.90 or later with the MSVC toolchain,
 and the Windows SDK (for the icon and version resources; the build still works without it).
 
 ```powershell
-git clone https://github.com/ball46/duet.git
+git clone https://github.com/thai-open-tools/duet.git
 cd duet
 cargo build --release -p duet-app -p duet-cli   # target\release\duet.exe and duet-cli.exe
 powershell -File scripts\check.ps1              # format, lint and the full test suite
@@ -384,9 +474,9 @@ fails if the app ever wires up an HTTP client, so *offline* is checked, not just
 
 ## Report a bug or ask for a feature
 
-Every issue is a card on the [Issues](https://github.com/ball46/duet/issues) page. Write in **English or Thai**, whichever is easier for you.
+Every issue is a card on the [Issues](https://github.com/thai-open-tools/duet/issues) page. Write in **English or Thai**, whichever is easier for you.
 
-1. Open **[New issue](https://github.com/ball46/duet/issues/new/choose)** (you need a free GitHub account).
+1. Open **[New issue](https://github.com/thai-open-tools/duet/issues/new/choose)** (you need a free GitHub account).
 2. Pick a card:
    - **🐞 Bug report**: something is wrong, crashes or looks broken.
    - **✨ Feature request**: something you wish duet did, or did differently.
@@ -400,9 +490,9 @@ Found a security problem? Please do not open a public card; see [SECURITY.md](SE
 <details>
 <summary><b>ภาษาไทย: วิธีแจ้งปัญหาหรือขอฟีเจอร์</b></summary>
 
-ทุกเรื่องที่แจ้งจะเป็นการ์ดหนึ่งใบในหน้า [Issues](https://github.com/ball46/duet/issues) เขียนเป็นภาษาไทยหรืออังกฤษก็ได้
+ทุกเรื่องที่แจ้งจะเป็นการ์ดหนึ่งใบในหน้า [Issues](https://github.com/thai-open-tools/duet/issues) เขียนเป็นภาษาไทยหรืออังกฤษก็ได้
 
-1. เปิด **[New issue](https://github.com/ball46/duet/issues/new/choose)** (ต้องมีบัญชี GitHub ซึ่งสมัครฟรี)
+1. เปิด **[New issue](https://github.com/thai-open-tools/duet/issues/new/choose)** (ต้องมีบัญชี GitHub ซึ่งสมัครฟรี)
 2. เลือกการ์ด
    - **🐞 Bug report** สำหรับสิ่งที่ทำงานผิด โปรแกรมปิดเอง หรือหน้าจอแสดงผิด
    - **✨ Feature request** สำหรับสิ่งที่อยากให้ duet ทำได้ หรืออยากให้ทำต่างจากเดิม
@@ -417,6 +507,18 @@ Found a security problem? Please do not open a public card; see [SECURITY.md](SE
 
 Want to fix something yourself? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## What works today
+
+| | Works today | Not there yet |
+|---|---|---|
+| **Folders** | Four ways to decide a match, tree or flat list, copy, delete to the Recycle Bin, sync in five modes, reports in HTML, Excel, text and CSV | Moved files are found only when the criterion reads contents, and a moved folder is tagged file by file; archives (`.zip`, `.tar`) are not opened |
+| **Text** | Line and character differences, ignore rules, editing, find and replace, encodings, 3-way merge, **Sort keys** for JSON and YAML (a changed key order is not a difference) | Sort keys is a read-only view: YAML comments are not shown, line numbers are those of the sorted text, and XML is not sorted |
+| **Tables** | CSV, TSV and Excel `.xlsx` / `.xlsm` (one sheet per side, read-only), cell by cell, key columns | `.xls` and `.xlsb` are not read, duet does not save back to `.xlsx`, a workbook that exists on one side of a folder compare opens as text, built-in formats 71 to 81, which cover dates and times saved by Thai-locale Excel, read as a serial number, and a Thai-calendar cell in another date format reads as Gregorian ISO (2024-03-05 where Excel shows 2567) |
+| **Pictures and bytes** | Pixel compare in four views; byte compare in hex | |
+| **Start from elsewhere** | Command line, `duet-cli`, git difftool and mergetool, Explorer right-click | On Windows 11 the Explorer verbs are under *Show more options* |
+| **Language** | The program, its F1 guide and its reports in Thai and English, one language at a time; the installer in both too; Thai text displays correctly | |
+| **Where it runs** | Windows 10 (1903 or later) and Windows 11, x64 | Windows on Arm is untested; macOS and Linux |
+
 ## Roadmap
 
 What comes next depends on the cards people open. Ideas so far:
@@ -424,7 +526,7 @@ What comes next depends on the cards people open. Ideas so far:
 - [ ] Code-signed releases, so SmartScreen stops warning
 - [ ] A native Windows on Arm (arm64) build
 - [ ] Look inside `.zip` and `.tar` archives, and compare a folder with a saved snapshot of it
-- [ ] Compare Excel `.xlsx` sheets directly (today: save as CSV, or paste the cells)
+- [ ] Read old Excel `.xls` and `.xlsb` files, and open a workbook that exists on one side of a folder compare
 - [ ] Thai word wrapping that never splits a word
 - [ ] macOS (needs Command-key shortcuts, Finder and Trash, and a Mac to build and test on)
 
@@ -448,7 +550,7 @@ Yes, for any use, under the [MIT License](LICENSE).
 <details>
 <summary><b>Why does Windows warn me when I run the installer?</b></summary>
 
-The 0.1 builds are not code-signed yet. See [Download and install](#download-and-install) for how to
+These builds are not code-signed yet. See [Download and install](#download-and-install) for how to
 check the file and run it.
 </details>
 
@@ -475,11 +577,11 @@ shortcuts and more questions like these.
 
 ## Star history
 
-<a href="https://www.star-history.com/?repos=ball46%2Fduet&amp;type=date">
+<a href="https://www.star-history.com/?repos=thai-open-tools%2Fduet&amp;type=date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ball46/duet&amp;type=date&amp;theme=dark&amp;legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ball46/duet&amp;type=date&amp;legend=top-left" />
-    <img alt="duet's GitHub star history" src="https://api.star-history.com/chart?repos=ball46/duet&amp;type=date&amp;legend=top-left" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=thai-open-tools/duet&amp;type=date&amp;theme=dark&amp;legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=thai-open-tools/duet&amp;type=date&amp;legend=top-left" />
+    <img alt="duet's GitHub star history" src="https://api.star-history.com/chart?repos=thai-open-tools/duet&amp;type=date&amp;legend=top-left" />
   </picture>
 </a>
 

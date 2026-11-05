@@ -1,17 +1,18 @@
 //! Go to line: parse what was typed into a 0-based line of one side.
 
 use crate::format::format_size;
+use crate::i18n::{tr, trf};
 
 /// "12" is line index 11 of a side with `count` lines. Past the end clamps to the last line;
 /// thousands separators are allowed.
 pub fn parse_line(text: &str, count: usize) -> Result<u32, String> {
     if count == 0 {
-        return Err("That side has no lines.".into());
+        return Err(tr("That side has no lines.").into());
     }
     let message = || {
-        format!(
+        trf(
             "Enter a line number from 1 to {}.",
-            format_size(count as u64)
+            &[&format_size(count as u64)],
         )
     };
     let number: u64 = text

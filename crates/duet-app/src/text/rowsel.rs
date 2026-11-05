@@ -10,6 +10,7 @@ use gpui_kit::{
     prelude::*, px,
 };
 
+use crate::i18n::tr;
 use crate::text::model::DisplayRow;
 use crate::text::view::TextView;
 use crate::ui::drag::follow_drag;
@@ -290,7 +291,7 @@ impl TextView {
                 cx.notify();
             }
             Ok(range) if range.is_empty() => {
-                self.notice = Some("There are no lines on that side to delete.".into());
+                self.notice = Some(tr("There are no lines on that side to delete.").into());
                 cx.notify();
             }
             Ok(range) => {

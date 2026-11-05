@@ -9,6 +9,7 @@ use gpui_kit::{Context, Entity, actions};
 
 use super::*;
 use crate::folder::prefs::MAX_TOLERANCE_SECS;
+use crate::i18n::tr;
 use crate::ui::menu::MenuEntry;
 
 actions!(
@@ -20,7 +21,8 @@ actions!(
         CriterionRules,
         ToggleOddScan,
         ToggleConfirmCopy,
-        ToggleEnterFolders
+        ToggleEnterFolders,
+        ToggleFindMoves
     ]
 );
 
@@ -28,33 +30,34 @@ actions!(
 pub fn criterion_menu(view: &FolderView) -> Vec<MenuEntry> {
     let mode = view.options().mode;
     vec![
-        MenuEntry::action("Content", CriterionContent).checked(mode == CompareMode::Content),
+        MenuEntry::action(tr("Content"), CriterionContent).checked(mode == CompareMode::Content),
         MenuEntry::action(
-            "Quick: size and modified time (reads no files)",
+            tr("Quick: size and modified time (reads no files)"),
             CriterionQuick,
         )
         .checked(mode == CompareMode::Quick),
-        MenuEntry::action("Size only", CriterionSize).checked(mode == CompareMode::Size),
-        MenuEntry::action("Content by the text compare rules", CriterionRules)
+        MenuEntry::action(tr("Size only"), CriterionSize).checked(mode == CompareMode::Size),
+        MenuEntry::action(tr("Content by the text compare rules"), CriterionRules)
             .checked(mode == CompareMode::Rules),
     ]
 }
 
-/// The Options menu: three settings of the folder view.
+/// The Options menu: the settings of the folder view.
 pub fn options_menu(view: &FolderView) -> Vec<MenuEntry> {
     let prefs = view.prefs();
     vec![
         MenuEntry::action(
-            "Look for invisible characters after a compare",
+            tr("Look for invisible characters after a compare"),
             ToggleOddScan,
         )
         .checked(prefs.odd_scan),
-        MenuEntry::action("Ask before copying", ToggleConfirmCopy).checked(prefs.confirm_copy),
+        MenuEntry::action(tr("Ask before copying"), ToggleConfirmCopy).checked(prefs.confirm_copy),
         MenuEntry::action(
-            "Double-click a folder to compare inside it",
+            tr("Double-click a folder to compare inside it"),
             ToggleEnterFolders,
         )
         .checked(prefs.enter_folders),
+        MenuEntry::action(tr("Find moved files"), ToggleFindMoves).checked(prefs.find_moves),
     ]
 }
 
@@ -72,10 +75,10 @@ impl FolderView {
     /// The criterion button's label; the button draws its caret.
     pub fn mode_button_label(&self) -> &'static str {
         match self.options.mode {
-            CompareMode::Quick => "Quick (size + time)",
-            CompareMode::Content => "Content",
-            CompareMode::Size => "Size only",
-            CompareMode::Rules => "Text rules",
+            CompareMode::Quick => tr("Quick (size + time)"),
+            CompareMode::Content => tr("Content"),
+            CompareMode::Size => tr("Size only"),
+            CompareMode::Rules => tr("Text rules"),
         }
     }
 
@@ -169,6 +172,40 @@ impl FolderView {
         } else {
             self.odd.drop_all();
             self.refresh_status();
+        }
+        cx.notify();
+    }
+
+    /// "Find moved files": remembered. Only a criterion that reads contents has a pass to
+    /// start or drop; turning it off keeps the result and loses the tags without a read, turning
+    /// it on compares again.
+    pub fn set_find_moves(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.options.find_moves == on {
+            return;
+        }
+        self.prefs.find_moves = on;
+        self.remember(prefs::FIND_MOVES, cx);
+        self.options.find_moves = on;
+        if !self.options.mode.reads_contents() {
+            cx.notify();
+        } else if on || self.job.is_running() {
+            self.refresh(cx);
+        } else {
+            self.rebuild_without_moves(cx);
+        }
+    }
+
+    fn rebuild_without_moves(&mut self, cx: &mut Context<Self>) {
+        if let Some(old) = self.model.take() {
+            let mut cmp = old.comparison().clone();
+            cmp.moved.clear();
+            let mut model = FolderModel::new(cmp);
+            model.carry_over(&old);
+            self.plan_epoch += 1;
+            self.close_sync_for_compare(cx);
+            self.moves_stopped = false;
+            self.set_model_status(&model, true);
+            self.model = Some(model);
         }
         cx.notify();
     }

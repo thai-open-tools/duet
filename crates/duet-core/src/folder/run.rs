@@ -3,9 +3,11 @@
 use std::path::Path;
 
 use crate::cancel::CancelToken;
+use crate::folder::actions::roots_overlap;
 use crate::folder::classify::apply_case;
 use crate::folder::content::{ContentProgress, SIMILAR_LIMIT, classify_contents};
 use crate::folder::entry::{Filters, ScanError, ScanProgress};
+use crate::folder::moves::{MoveProgress, find_moves};
 use crate::folder::scan::{ScanOptions, scan};
 use crate::folder::tree::{FolderComparison, QuickRule, apply_size_rule, build_tree_with, rollup};
 use crate::text::diff::{DiffOptions, WhitespaceMode};
@@ -79,6 +81,8 @@ pub struct FolderOptions {
     pub format_important: bool,
     /// Rules mode reads pairs up to this size a side.
     pub rules_limit: u64,
+    /// Content and Rules only: tag a left-only and a right-only file with the same bytes.
+    pub find_moves: bool,
 }
 
 impl Default for FolderOptions {
@@ -94,6 +98,7 @@ impl Default for FolderOptions {
             text_rules: FolderTextRules::default(),
             format_important: false,
             rules_limit: RULES_LIMIT,
+            find_moves: false,
         }
     }
 }
@@ -103,6 +108,7 @@ pub struct FolderProgress {
     pub left: ScanProgress,
     pub right: ScanProgress,
     pub content: ContentProgress,
+    pub moves: MoveProgress,
 }
 
 pub fn compare_folders(
@@ -126,6 +132,17 @@ pub fn compare_folders(
         CompareMode::Size => apply_size_rule(&mut cmp),
         CompareMode::Content | CompareMode::Rules => {
             classify_contents(&mut cmp, left, right, opts, &progress.content, cancel)?;
+            // Nested roots hold one physical file twice (`y/a.txt` and `a.txt`): no twin to find.
+            if opts.find_moves && !roots_overlap(left, right) {
+                find_moves(
+                    &mut cmp,
+                    left,
+                    right,
+                    opts.max_parallel_io,
+                    &progress.moves,
+                    cancel,
+                )?;
+            }
         }
     }
     apply_case(&mut cmp);
@@ -442,5 +459,63 @@ mod tests {
         };
         let cmp = run_with(l.path(), r.path(), &opts);
         assert!(matches!(cmp.nodes[0].status, Status::Different { .. }));
+    }
+
+    fn moved_fixture() -> (tempfile::TempDir, tempfile::TempDir) {
+        let (l, r) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        put(l.path(), "a.txt", b"line\r\nline\r\n", time(5));
+        put(r.path(), "b.txt", b"line\r\nline\r\n", time(5));
+        (l, r)
+    }
+
+    fn moves_on(mode: CompareMode) -> FolderOptions {
+        FolderOptions {
+            mode,
+            find_moves: true,
+            ..FolderOptions::default()
+        }
+    }
+
+    #[test]
+    fn quick_and_size_find_no_moves_and_read_nothing() {
+        let (l, r) = moved_fixture();
+        for mode in [CompareMode::Quick, CompareMode::Size] {
+            let progress = FolderProgress::default();
+            let cmp = compare_folders(
+                l.path(),
+                r.path(),
+                &moves_on(mode),
+                &progress,
+                &CancelToken::new(),
+            )
+            .unwrap();
+            assert!(cmp.moved.is_empty(), "{mode:?}");
+            assert_eq!(progress.moves.total.load(Ordering::Relaxed), 0, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn content_and_rules_find_moves() {
+        let (l, r) = moved_fixture();
+        for mode in [CompareMode::Content, CompareMode::Rules] {
+            let cmp = run_with(l.path(), r.path(), &moves_on(mode));
+            assert_eq!(cmp.moved_files(), 1, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn moves_are_off_by_default() {
+        let (l, r) = moved_fixture();
+        let cmp = run(l.path(), r.path(), CompareMode::Content);
+        assert!(cmp.moved.is_empty());
+    }
+
+    #[test]
+    fn rules_mode_moves_need_identical_bytes() {
+        let (l, r) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        put(l.path(), "a.txt", b"line\r\nline\r\n", time(5));
+        put(r.path(), "b.txt", b"line\nline\n", time(5));
+        let cmp = run_with(l.path(), r.path(), &moves_on(CompareMode::Rules));
+        assert!(cmp.moved.is_empty());
     }
 }

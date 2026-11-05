@@ -3,10 +3,11 @@
 use std::ops::Range;
 use std::time::SystemTime;
 
-use crate::folder::cells::{NAME_SIZE, side_name_color};
+use crate::folder::cells::{NAME_SIZE, moved_tag, name_full_width, side_name_color};
 use crate::folder::model::SortKey;
 use crate::folder::ops::row_tip;
 use crate::format::{format_size, format_time};
+use crate::i18n::{tr, tr_key};
 use crate::palette::Palette;
 use crate::ui::fonts::Fonts;
 use crate::ui::style::{LdExt as _, SCROLLBAR_WIDTH, ld_ghost, ld_pill, ld_tip};
@@ -19,7 +20,9 @@ use gpui_kit::{
     Window, div, prelude::*, px, transparent_black,
 };
 
+use super::rows::moved_tag_of;
 use super::*;
+use crate::ui::fonts::{CODE_SIZE, code_advance};
 
 const PATH_MIN: f32 = 240.;
 const STATUS_COL: f32 = 96.;
@@ -29,18 +32,26 @@ const GAP: f32 = 8.;
 
 /// The header buttons: id, title, the key they sort by.
 const COLUMNS: [(&str, &str, SortKey); 6] = [
-    ("folder-sort-path", "Path", SortKey::Path),
-    ("folder-sort-status", "Status", SortKey::Status),
-    ("folder-sort-left-size", "Size (left)", SortKey::LeftSize),
-    ("folder-sort-right-size", "Size (right)", SortKey::RightSize),
+    ("folder-sort-path", tr_key("Path"), SortKey::Path),
+    ("folder-sort-status", tr_key("Status"), SortKey::Status),
+    (
+        "folder-sort-left-size",
+        tr_key("Size (left)"),
+        SortKey::LeftSize,
+    ),
+    (
+        "folder-sort-right-size",
+        tr_key("Size (right)"),
+        SortKey::RightSize,
+    ),
     (
         "folder-sort-left-time",
-        "Modified (left)",
+        tr_key("Modified (left)"),
         SortKey::LeftTime,
     ),
     (
         "folder-sort-right-time",
-        "Modified (right)",
+        tr_key("Modified (right)"),
         SortKey::RightTime,
     ),
 ];
@@ -48,29 +59,33 @@ const COLUMNS: [(&str, &str, SortKey); 6] = [
 /// The status pill's words (`js:637-638`).
 pub fn status_label(node: &Node) -> &'static str {
     match (&node.status, node.warning()) {
-        (Status::Error(_), _) => "Unreadable",
-        (_, Some(Warning::CaseOnly)) => "Case-only name ⚠",
-        (_, Some(Warning::OddSpace)) => "Whitespace kind ⚠",
-        (_, Some(Warning::Script)) => "Script ⚠",
+        (Status::Error(_), _) => tr_key("Unreadable"),
+        (_, Some(Warning::CaseOnly)) => tr_key("Case-only name ⚠"),
+        (_, Some(Warning::OddSpace)) => tr_key("Whitespace kind ⚠"),
+        (_, Some(Warning::Script)) => tr_key("Script ⚠"),
         (Status::Different { .. }, _) => match node.note.as_deref() {
-            Some(note) if note.encoding_differs() => "Encoding differs",
+            Some(note) if note.encoding_differs() => tr_key("Encoding differs"),
             Some(note) if note.format_differs() => format_word(note.eol_differs()),
-            _ => "Different",
+            _ => tr_key("Different"),
         },
         (Status::Similar { .. }, _) => match node.note.as_deref() {
-            Some(note) if note.soft => "Unimportant",
+            Some(note) if note.soft => tr_key("Unimportant"),
             Some(note) => format_word(note.eol_differs()),
-            None => "Unimportant",
+            None => tr_key("Unimportant"),
         },
-        (Status::Same, _) => "Same",
-        (Status::LeftOnly, _) => "Left only",
-        (Status::RightOnly, _) => "Right only",
-        (Status::Pending, _) => "Comparing…",
+        (Status::Same, _) => tr_key("Same"),
+        (Status::LeftOnly, _) => tr_key("Left only"),
+        (Status::RightOnly, _) => tr_key("Right only"),
+        (Status::Pending, _) => tr_key("Comparing…"),
     }
 }
 
 fn format_word(eol: bool) -> &'static str {
-    if eol { "Line endings only" } else { "BOM only" }
+    if eol {
+        tr_key("Line endings only")
+    } else {
+        tr_key("BOM only")
+    }
 }
 
 /// The pill's text and background.
@@ -100,6 +115,14 @@ impl FolderView {
             return Vec::new();
         };
         let selected = model.selected_row();
+        // The path column from the last frame (0 before the first, when every tag shows): what
+        // is left of the list beside the other columns.
+        let list = f32::from(self.scroll.0.borrow().base_handle.bounds().size.width);
+        let path_cell = (list > 0.).then(|| {
+            (list - SCROLLBAR_WIDTH - 18. - STATUS_COL - 2. * SIZE_COL - 2. * TIME_COL - 5. * GAP)
+                .max(PATH_MIN)
+        });
+        let advance = f32::from(code_advance(window, &fonts.code)) * NAME_SIZE / CODE_SIZE;
         range
             .map(|row| {
                 let index = model.node_index(row);
@@ -141,6 +164,17 @@ impl FolderView {
                     )
                 };
                 let is_selected = selected == Some(row);
+                let name_full = name_full_width(&base, advance);
+                let moved = moved_tag_of(
+                    model,
+                    index,
+                    row,
+                    path_cell,
+                    &|chars| {
+                        path_cell.is_none_or(|cell| cell >= name_full + chars as f32 * 6. + 12.)
+                    },
+                    cx,
+                );
                 let number = |id: &'static str, text: String, width: f32| {
                     div()
                         .id((id, row))
@@ -244,7 +278,8 @@ impl FolderView {
                                         &palette,
                                     ))
                                     .child(base),
-                            ),
+                            )
+                            .when_some(moved, |d, tag| d.child(moved_tag(tag, &palette))),
                     )
                     .child(
                         h_flex()
@@ -253,10 +288,10 @@ impl FolderView {
                             .gap(px(4.))
                             .items_center()
                             .child(
-                                ld_pill(label, fg, bg)
+                                ld_pill(tr(label), fg, bg)
                                     .id(("folder-flat-status", row))
                                     .test_support()
-                                    .aria_label(label)
+                                    .aria_label(tr(label))
                                     .when_some(tip, |d, tip| {
                                         d.tooltip(move |window, cx| ld_tip(tip.clone(), window, cx))
                                     }),
@@ -268,7 +303,7 @@ impl FolderView {
                                         .test_support()
                                         .text_size(px(10.))
                                         .text_color(palette.moved)
-                                        .child("other time"),
+                                        .child(tr("other time")),
                                 )
                             }),
                     )
@@ -294,11 +329,11 @@ impl FolderView {
         let button = |(id, title, key): (&'static str, &'static str, SortKey)| {
             let on = key == sorted;
             let text = if !on {
-                title.to_owned()
+                tr(title).to_owned()
             } else if desc {
-                format!("{title} ▼")
+                format!("{} ▼", tr(title))
             } else {
-                format!("{title} ▲")
+                format!("{} ▲", tr(title))
             };
             let mut button = ld_ghost(id, text, p)
                 .ld_small()

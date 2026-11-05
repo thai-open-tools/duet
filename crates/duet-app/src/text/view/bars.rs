@@ -1,6 +1,7 @@
 //! The text view's find and go-to bars: their state, opening, stepping and closing.
 
 use super::*;
+use crate::i18n::tr;
 
 impl TextView {
     pub fn find_open(&self) -> bool {
@@ -17,30 +18,32 @@ impl TextView {
     pub fn find_status(&self) -> Option<String> {
         let bar = self.find.as_ref()?;
         let Some(result) = &bar.result else {
-            return Some("Searching…".into());
+            return Some(tr("Searching…").into());
         };
         if result.error.is_some() {
-            return Some("Invalid pattern".into());
+            return Some(tr("Invalid pattern").into());
         }
         let total = result.hits.len();
         let plus = if result.truncated { "+" } else { "" };
         Some(match (total, bar.current) {
-            (0, _) => "No matches".into(),
+            (0, _) => tr("No matches").into(),
             (_, Some(i)) => format!(
-                "{} of {}{plus}",
-                format_size(i as u64 + 1),
-                format_size(total as u64)
+                "{}{plus}",
+                trf(
+                    "{} of {}",
+                    &[&format_size(i as u64 + 1), &format_size(total as u64)]
+                )
             ),
             (_, None) if !result.truncated => count_of(total as u64, "match", "matches"),
-            (_, None) => format!("{}+ matches", format_size(total as u64)),
+            (_, None) => trf("{}+ matches", &[&format_size(total as u64)]),
         })
     }
 
     pub(super) fn open_find(&mut self, _: &OpenFind, window: &mut Window, cx: &mut Context<Self>) {
         let prefill = self.find_prefill();
         if self.find.is_none() {
-            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find text"));
-            let replace = cx.new(|cx| InputState::new(window, cx).placeholder("Replace with"));
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(tr("Find text")));
+            let replace = cx.new(|cx| InputState::new(window, cx).placeholder(tr("Replace with")));
             let subscriptions = vec![
                 cx.subscribe_in(
                     &input,
@@ -296,7 +299,7 @@ impl TextView {
     pub(super) fn open_goto(&mut self, _: &OpenGoTo, window: &mut Window, cx: &mut Context<Self>) {
         self.find = None;
         if self.goto.is_none() {
-            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Line number"));
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(tr("Line number")));
             let subscription = cx.subscribe_in(
                 &input,
                 window,

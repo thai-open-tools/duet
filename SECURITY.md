@@ -4,7 +4,7 @@
 
 Please report security problems **privately**, not in a public issue:
 open the repository's **Security** tab › **Report a vulnerability**
-([Security tab](https://github.com/ball46/duet/security)).
+([Security tab](https://github.com/thai-open-tools/duet/security)).
 
 Say what you found, how to reproduce it, and what someone could do with it. I aim to answer
 within 7 days. Once a fix is released, the advisory is published with credit to you, unless you
@@ -20,7 +20,7 @@ Only the latest release gets security fixes.
 
 กรุณาแจ้งปัญหาด้านความปลอดภัย **แบบส่วนตัว** อย่าเปิดเป็น issue สาธารณะ
 โดยเข้าแท็บ **Security** ของ repository แล้วเลือก **Report a vulnerability**
-([แท็บ Security](https://github.com/ball46/duet/security))
+([แท็บ Security](https://github.com/thai-open-tools/duet/security))
 
 บอกว่าเจออะไร ทำซ้ำได้อย่างไร และคนอื่นอาจใช้ช่องโหว่นี้ทำอะไรได้ ผู้ดูแลตั้งใจจะตอบภายใน 7 วัน
 เมื่อปล่อยรุ่นที่แก้แล้ว จะเผยแพร่รายละเอียดพร้อมให้เครดิตผู้แจ้ง เว้นแต่ผู้แจ้งต้องการไม่เปิดเผยชื่อ

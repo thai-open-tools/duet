@@ -9,10 +9,11 @@ use gpui_kit::component::h_flex;
 use gpui_kit::{AnyElement, Div, ExternalPaths, PathPromptOptions, Stateful, div};
 
 use super::*;
+use crate::i18n::{tr, trf};
 use crate::pathbar::{ActiveEdit, dropped_files, typed_file};
 use crate::ui::fonts::SMALL_SIZE;
+use crate::ui::prose::ProseExt as _;
 
-const TWO_USED: &str = "files dropped: the first two are used.";
 /// The group of both drop zones: a file dragged over the body outlines each half.
 const DROP_BODY: &str = "picture-drop-body";
 
@@ -158,7 +159,8 @@ impl PictureView {
             _ => return,
         };
         if paths.len() > 2 {
-            let notice: SharedString = format!("{} {TWO_USED}", paths.len()).into();
+            let notice: SharedString =
+                trf("{} files dropped: the first two are used.", &[&paths.len()]).into();
             // The new pair clears the notice when it loads, so it is handed over.
             if asked {
                 self.carried = Some(notice.clone());
@@ -176,9 +178,9 @@ impl PictureView {
     pub(super) fn drop_zones(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let zone = |left: bool| {
             let (id, text) = if left {
-                ("picture-drop-left", "Drop as the left picture")
+                ("picture-drop-left", tr("Drop as the left picture"))
             } else {
-                ("picture-drop-right", "Drop as the right picture")
+                ("picture-drop-right", tr("Drop as the right picture"))
             };
             let (line, accent, lit) = (p.line, p.accent, p.bg_mod);
             div()
@@ -211,7 +213,7 @@ impl PictureView {
                         .rounded(px(8.))
                         .bg(p.panel3)
                         .text_size(px(SMALL_SIZE))
-                        .child(text),
+                        .prose(text),
                 )
         };
         h_flex()

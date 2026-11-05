@@ -62,7 +62,7 @@ body:
     attributes:
       label: "duet version · เวอร์ชันของ duet"
       description: "Settings › Apps › duet, the name of the file you downloaded, or duet.exe › Properties › Details. · ดูได้ที่ Settings › Apps › duet จากชื่อไฟล์ที่ดาวน์โหลด หรือคลิกขวาที่ duet.exe › Properties › Details"
-      placeholder: "0.1.1"
+      placeholder: "0.2.0"
     validations:
       required: true
 

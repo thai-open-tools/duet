@@ -737,3 +737,285 @@ fn names_and_notes_are_escaped_in_every_part() {
     assert_eq!(summary[2], ["line one\nline two [U+0001]"]);
     assert_eq!(row_starting(&summary, "A")[1], "A&B");
 }
+
+// ---- The workbook in Thai ----
+
+#[path = "../../../../tests/support/report_text.rs"]
+mod report_text;
+
+const THAI_SHEETS: [&str; 3] = ["สรุป", "ไฟล์", "บรรทัดที่เปลี่ยน"];
+const THAI_RESULTS: [&str; 4] = ["ผ่าน", "ต้องแก้", "รอตรวจ", "ไม่เกี่ยวข้อง"];
+
+fn thai_options() -> ReportOptions {
+    ReportOptions {
+        lang: crate::i18n::Lang::Th,
+        ..book_options()
+    }
+}
+
+/// The context the app builds for a Thai report: its words are Thai too.
+fn thai_context() -> ReportContext {
+    let _th = crate::i18n::scoped(crate::i18n::Lang::Th);
+    ReportContext {
+        criterion: crate::folder::report::criterion_text(CompareMode::Content).to_owned(),
+        scope: "ไฟล์ที่เลือก".to_owned(),
+        ..context()
+    }
+}
+
+/// A sample compared and read under Thai, with the workbook written from it, and the words of
+/// the compare itself (names and paths) that the Thai report keeps.
+fn thai_book() -> (Vec<(String, String)>, Vec<String>) {
+    let _th = crate::i18n::scoped(crate::i18n::Lang::Th);
+    let sample = sample();
+    let book = parts(&workbook_bytes(
+        &sample.items,
+        Some(&sample.lines),
+        &thai_options(),
+        &thai_context(),
+    ));
+    let mut words: Vec<String> = [
+        "IWT",
+        "PRD",
+        "Check before deploy",
+        "9.9.9",
+        "C:\\a\\iwt",
+        "C:\\a\\prd",
+        "url",
+        "jdbc",
+        "user",
+        "svc",
+        "Secr",
+        "timeout",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    for item in &sample.items {
+        words.push(item.rel.clone());
+        words.extend(item.rel.split('/').map(str::to_owned));
+        for side in [&item.left, &item.right].into_iter().flatten() {
+            words.push(side.rel.clone());
+            words.push(side.path.to_string_lossy().into_owned());
+        }
+    }
+    (book, words)
+}
+
+fn utf16(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+fn sheet_names(parts: &[(String, String)]) -> Vec<String> {
+    let workbook = roxmltree::Document::parse(part(parts, "xl/workbook.xml")).unwrap();
+    workbook
+        .descendants()
+        .filter(|n| n.has_tag_name("sheet"))
+        .map(|n| n.attribute("name").unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn thai_sheet_names_fit_excel() {
+    let (book, _) = thai_book();
+    let names = sheet_names(&book);
+    assert_eq!(names, THAI_SHEETS);
+    for name in &names {
+        assert!(utf16(name) <= 31, "{name}: Excel allows 31 characters");
+        assert!(
+            !name.contains(['[', ']', ':', '*', '?', '/', '\\', '\'']),
+            "{name}: a character Excel refuses in a sheet name"
+        );
+        assert!(!name.is_empty());
+    }
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), names.len(), "three different names");
+}
+
+#[test]
+fn thai_links_and_the_filter_name_their_sheet() {
+    let (book, _) = thai_book();
+    let names = sheet_names(&book);
+    assert_eq!(names, THAI_SHEETS, "the names the links must match");
+    let files = roxmltree::Document::parse(part(&book, "xl/worksheets/sheet2.xml")).unwrap();
+    let links: Vec<&str> = files
+        .descendants()
+        .filter(|n| n.has_tag_name("hyperlink"))
+        .map(|n| n.attribute("location").unwrap())
+        .collect();
+    assert!(!links.is_empty());
+    let lines_rows = rows(part(&book, "xl/worksheets/sheet3.xml")).len();
+    for location in links {
+        // The name is quoted as Excel requires, and it is a sheet that exists.
+        let rest = location
+            .strip_prefix(&format!("'{}'!A", names[2]))
+            .unwrap_or_else(|| panic!("{location} names no sheet of {names:?}"));
+        let row: usize = rest.parse().unwrap();
+        assert!((2..=lines_rows).contains(&row), "{location}");
+    }
+    let workbook = roxmltree::Document::parse(part(&book, "xl/workbook.xml")).unwrap();
+    let hidden: Vec<&str> = workbook
+        .descendants()
+        .filter(|n| n.has_tag_name("definedName"))
+        .map(|n| n.text().unwrap())
+        .collect();
+    assert_eq!(hidden.len(), 2);
+    for (text, name) in hidden.iter().zip(&names[1..]) {
+        assert!(text.starts_with(&format!("'{name}'!$A$1:$")), "{text}");
+    }
+}
+
+fn validation(book: &[(String, String)]) -> (String, String, String) {
+    let files = roxmltree::Document::parse(part(book, "xl/worksheets/sheet2.xml")).unwrap();
+    let one = files
+        .descendants()
+        .find(|n| n.has_tag_name("dataValidation"))
+        .unwrap();
+    let formula = one
+        .children()
+        .find(|n| n.has_tag_name("formula1"))
+        .unwrap()
+        .text()
+        .unwrap()
+        .to_owned();
+    (
+        formula,
+        one.attribute("promptTitle").unwrap().to_owned(),
+        one.attribute("prompt").unwrap().to_owned(),
+    )
+}
+
+#[test]
+fn the_thai_result_list_is_valid() {
+    let (book, _) = thai_book();
+    let (formula, _, _) = validation(&book);
+    assert!(utf16(&formula) <= 255, "Excel's limit on a list formula");
+    let inner = formula
+        .strip_prefix('"')
+        .and_then(|f| f.strip_suffix('"'))
+        .expect("a quoted list");
+    assert!(!inner.contains('"'));
+    let values: Vec<&str> = inner.split(',').collect();
+    assert_eq!(values, THAI_RESULTS, "four values, no comma inside one");
+    assert!(values.iter().all(|v| !v.is_empty() && *v == v.trim()));
+}
+
+#[test]
+fn thai_list_prompts_fit() {
+    let (book, _) = thai_book();
+    let (_, title, prompt) = validation(&book);
+    assert!(utf16(&title) <= 32, "{title}");
+    assert!(utf16(&prompt) <= 255, "{prompt}");
+    assert_eq!(title, "ผลตรวจ", "the title is the column's name");
+    assert_ne!(prompt, "Pick one from the list");
+    let files = part(&book, "xl/worksheets/sheet2.xml");
+    assert!(!files.contains("Go to the changed lines"), "{files}");
+}
+
+#[test]
+fn the_thai_summary_names_its_own_sheet_and_column() {
+    let (book, _) = thai_book();
+    let summary = rows(part(&book, "xl/worksheets/sheet1.xml"));
+    let text: Vec<&str> = summary.iter().flatten().map(String::as_str).collect();
+    let all = text.join("\n");
+    let column = "ควรตรวจดู";
+    for name in [column, THAI_SHEETS[1], THAI_SHEETS[2]] {
+        assert!(all.contains(name), "{name} in\n{all}");
+    }
+    // The note on the result column names the choices the team picks.
+    let note = text
+        .iter()
+        .find(|cell| cell.contains("ผลตรวจ") && cell.contains("ผ่าน"))
+        .expect("the note on the Result column");
+    for value in THAI_RESULTS {
+        assert!(note.contains(value), "{value} in {note}");
+    }
+    // The column it names is the Files sheet's own.
+    let files = rows(part(&book, "xl/worksheets/sheet2.xml"));
+    assert!(files[0].iter().any(|title| title == column));
+    assert!(files[0].iter().any(|title| title == "ผลตรวจ"));
+}
+
+#[test]
+fn thai_parts_are_well_formed_xml() {
+    let (book, _) = thai_book();
+    assert_eq!(book.len(), PARTS.len());
+    for (name, xml) in &book {
+        roxmltree::Document::parse(xml).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(
+            xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\""),
+            "{name}"
+        );
+    }
+    // Thai letters stay letters: they are not escaped as entities.
+    let workbook = part(&book, "xl/workbook.xml");
+    assert!(workbook.contains("name=\"บรรทัดที่เปลี่ยน\""), "{workbook}");
+    assert_eq!(
+        xl_text("ไฟล์ <a> & \"b\""),
+        "ไฟล์ &lt;a&gt; &amp; &quot;b&quot;"
+    );
+}
+
+#[test]
+fn the_thai_workbook_carries_no_stray_english() {
+    let (book, words) = thai_book();
+    let strip: Vec<&str> = words.iter().map(String::as_str).collect();
+    let allowed = [
+        "duet",
+        "CRLF",
+        "LF",
+        "CR",
+        "BOM",
+        "EOL",
+        "NBSP",
+        "LRM",
+        "ZWSP",
+        "Linux",
+        "Windows",
+        "config",
+        "encoding",
+        "path",
+        "hex",
+        "password",
+        "conflict",
+        "UTF",
+        "MiB",
+        "bash",
+        "bad",
+        "interpreter",
+        "properties",
+        "txt",
+        "cfg",
+        "env",
+        "dat",
+        "bin",
+    ];
+    for name in [
+        "xl/workbook.xml",
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/sheet2.xml",
+        "xl/worksheets/sheet3.xml",
+    ] {
+        report_text::assert_no_stray_english(part(&book, name), &strip, &allowed);
+    }
+}
+
+#[test]
+fn a_workbook_without_a_language_is_english() {
+    let parts = sample_book(&book_options());
+    assert_eq!(sheet_names(&parts), ["Summary", "Files", "Changed lines"]);
+    assert_eq!(crate::i18n::scoped_lang(), None);
+}
+
+#[test]
+fn xlsx_note_cell_names_the_other_path() {
+    let mut moved = item("a.txt", ItemState::LeftOnly);
+    moved.moved_to = Some("new/a.txt".to_owned());
+    let book = parts(&workbook_bytes(&[moved], None, &options(), &context()));
+    let sheet = part(&book, "xl/worksheets/sheet2.xml");
+    assert!(
+        sheet.contains("Same contents as new/a.txt in PRD (moved or renamed)"),
+        "{sheet}"
+    );
+}

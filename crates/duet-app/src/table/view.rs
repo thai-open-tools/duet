@@ -25,6 +25,7 @@ use gpui_kit::{
 };
 
 use crate::format::format_size;
+use crate::i18n::{Lang, LiveText, live, tr, tr_key, trf};
 use crate::job::JobSlot;
 use crate::palette::Palette;
 use crate::pathbar::ActiveEdit;
@@ -33,6 +34,7 @@ use crate::settings;
 use crate::table::prefs::TablePrefs;
 use crate::tabs::badge_text;
 use crate::ui::fonts::{Fonts, UI_SIZE};
+use crate::ui::prose::ProseExt as _;
 
 mod actions;
 mod detail;
@@ -40,12 +42,14 @@ mod export;
 mod find;
 mod grid;
 mod open;
+mod sheet;
 mod status;
 mod toolbar;
 
 pub use actions::{MenuColumn, MenuTarget, key_token};
 pub use detail::{DETAIL_HINT, DETAIL_WINDOW_CHARS, Detail, DetailSide};
 pub use grid::{CellMark, display_text, text_width};
+pub use sheet::BookInfo;
 
 /// A listener that moves the selection unless a field has the keys.
 macro_rules! move_key {
@@ -127,6 +131,7 @@ actions!(
         TableOpenRight
     ]
 );
+use sheet::{TableSheetNextLeft, TableSheetNextRight, TableSheetPrevLeft, TableSheetPrevRight};
 
 pub const CONTEXT: &str = "TableView";
 pub const ROW_HEIGHT: f32 = 22.0;
@@ -135,7 +140,7 @@ pub const MAX_FILE_BYTES: u64 = 160 * 1024 * 1024;
 
 /// The key box applies this long after the last change.
 const KEYS_DELAY: Duration = Duration::from_millis(600);
-const CANCELLED: &str = "Cancelled: the result is incomplete.";
+const CANCELLED: &str = tr_key("Cancelled: the result is incomplete.");
 /// How often the "Parsing…" status is redrawn while a side parses.
 const PROGRESS_TICK: Duration = Duration::from_millis(250);
 
@@ -168,6 +173,10 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-g", TableGoTo, c),
         KeyBinding::new("ctrl-o", TableOpenLeft, c),
         KeyBinding::new("ctrl-shift-o", TableOpenRight, c),
+        KeyBinding::new("ctrl-pageup", TableSheetPrevLeft, c),
+        KeyBinding::new("ctrl-pagedown", TableSheetNextLeft, c),
+        KeyBinding::new("ctrl-shift-pageup", TableSheetPrevRight, c),
+        KeyBinding::new("ctrl-shift-pagedown", TableSheetNextRight, c),
     ]
 }
 
@@ -197,6 +206,8 @@ pub struct SideInfo {
     pub auto: bool,
     pub rows: usize,
     pub columns: usize,
+    /// The workbook and sheet this side was read from; `None` for CSV and pasted text.
+    pub book: Option<BookInfo>,
 }
 
 /// A side's decoded text, kept so a delimiter change parses it again without reading the file.
@@ -219,6 +230,8 @@ struct Progress {
 enum Source {
     File(PathBuf),
     Kept(Kept),
+    /// An Excel workbook, read sheet by sheet (`sheet.rs`).
+    Book(sheet::BookSource),
 }
 
 struct SideJob {
@@ -229,12 +242,20 @@ struct SideJob {
 
 enum SideError {
     Cancelled,
-    Message(String),
+    Message(LiveText),
+    /// A workbook opened but the sheet asked for could not be read: the side keeps the workbook,
+    /// and with it the picker that leads to its other sheets.
+    Sheet {
+        kept: Box<Kept>,
+        message: LiveText,
+    },
 }
 
 struct Loaded {
     kept: Kept,
     table: Arc<Table>,
+    /// The sheet asked for is no longer in the workbook: the pick is forgotten.
+    pick_gone: bool,
 }
 
 /// A finished compare and what it was made from.
@@ -253,6 +274,8 @@ enum Mode {
     Refresh,
     /// Parse the kept text again (a delimiter change).
     Reparse,
+    /// Read another sheet of one side's workbook (the index of the side).
+    Resheet(usize),
     /// Only pair the rows again (any other option, a swap).
     Recompare,
 }
@@ -272,7 +295,10 @@ fn file_name(path: &Path) -> String {
 }
 
 fn pasted_name(left: bool) -> String {
-    format!("Pasted text ({})", if left { "left" } else { "right" })
+    trf(
+        "Pasted text ({})",
+        &[&tr(if left { "left" } else { "right" })],
+    )
 }
 
 /// The kept text of a pasted side (R10): UTF-8, no path, named for its side.
@@ -290,6 +316,7 @@ fn pasted_kept(left: bool, text: &str) -> Kept {
             auto: true,
             rows: 0,
             columns: 0,
+            book: None,
         },
         text: Arc::from(text),
         binary: is_binary(text.as_bytes()),
@@ -305,13 +332,21 @@ fn load_side(job: SideJob, cancel: &CancelToken, progress: &Progress) -> Result<
     } = job;
     let (mut kept, auto_name) = match source {
         Source::Kept(kept) => (kept, name),
+        Source::Book(_) => unreachable!("a workbook side is read by sheet::run_jobs"),
         Source::File(path) => {
-            let open_error = |err: String| SideError::Message(format!("Can't open {name}: {err}"));
-            let meta = std::fs::metadata(&path).map_err(|err| open_error(format!("{err}.")))?;
+            // Built from data, so a switch of language rebuilds it (`LiveText::relabel`).
+            let open_error = |err: LiveText| {
+                let name = name.clone();
+                SideError::Message(LiveText::new(move || {
+                    trf("Can't open {}: {}", &[&name, &err])
+                }))
+            };
+            let os_error = |err: std::io::Error| open_error(format!("{err}.").into());
+            let meta = std::fs::metadata(&path).map_err(os_error)?;
             if meta.len() > MAX_FILE_BYTES {
-                return Err(open_error("the file is larger than 160 MB.".into()));
+                return Err(open_error(live("the file is larger than 160 MB.")));
             }
-            let bytes = std::fs::read(&path).map_err(|err| open_error(format!("{err}.")))?;
+            let bytes = std::fs::read(&path).map_err(os_error)?;
             cancel.check().map_err(|Cancelled| SideError::Cancelled)?;
             let binary = is_binary(&bytes);
             let decoded = encoding::decode(&bytes);
@@ -326,6 +361,7 @@ fn load_side(job: SideJob, cancel: &CancelToken, progress: &Progress) -> Result<
                     auto: true,
                     rows: 0,
                     columns: 0,
+                    book: None,
                 },
                 text,
                 binary,
@@ -350,6 +386,7 @@ fn load_side(job: SideJob, cancel: &CancelToken, progress: &Progress) -> Result<
     Ok(Loaded {
         kept,
         table: Arc::new(table),
+        pick_gone: false,
     })
 }
 
@@ -370,15 +407,19 @@ pub struct TableView {
     pasted: [bool; 2],
     /// The sides the last `TableEvent::Open` named: `load_paths` replaces their pasted text.
     opened: [bool; 2],
+    /// The sheet each side was asked to show, by name; `None` follows the default rule.
+    sheet_picks: [Option<String>; 2],
     kept: [Option<Kept>; 2],
     tables: [Option<Arc<Table>>; 2],
     /// Why a side could not be opened.
-    messages: [Option<SharedString>; 2],
+    messages: [Option<LiveText>; 2],
     diff: Option<TableDiff>,
     /// The tables and the options `diff` was made from. Its rows index these, so while a swap
     /// or an option change recompares, the old result still draws from its own tables.
     compared: [Option<Arc<Table>>; 2],
     compared_options: CompareOptions,
+    /// The language picked in the Export menu; `None` follows the UI. Not saved.
+    report_lang: Option<Lang>,
     /// The display rows (R7): the rows of `diff` that the filter shows.
     view: View,
     /// Column widths for `diff`, measured on its first frame (R8).
@@ -478,7 +519,7 @@ impl TableView {
     fn blank(left: PathBuf, right: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let prefs = TablePrefs::load(settings::settings_file(cx).as_deref());
         let keys_input = cx.new(|cx| {
-            let mut state = InputState::new(window, cx).placeholder(toolbar::KEYS_PLACEHOLDER);
+            let mut state = InputState::new(window, cx).placeholder(tr(toolbar::KEYS_PLACEHOLDER));
             state.set_value(prefs.keys.clone(), window, cx);
             state
         });
@@ -495,12 +536,14 @@ impl TableView {
             paths: [left, right],
             pasted: [false, false],
             opened: [false, false],
+            sheet_picks: [None, None],
             kept: [None, None],
             tables: [None, None],
             messages: [None, None],
             diff: None,
             compared: [None, None],
             compared_options: CompareOptions::default(),
+            report_lang: None,
             view: View::default(),
             layout: None,
             selection: None,
@@ -563,6 +606,34 @@ impl TableView {
         self.messages[side_index(left)].as_deref()
     }
 
+    /// The language changed: a notice is one-shot feedback in the old language, so it goes and the
+    /// status falls back to what it works out. What else is stored is said again: a failed side's
+    /// message, a pasted side's name, the binary note, the parse progress and the inputs'
+    /// placeholders.
+    pub fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.notice = None;
+        for message in self.messages.iter_mut().flatten() {
+            message.relabel();
+        }
+        for index in [LEFT, RIGHT] {
+            if self.pasted[index]
+                && let Some(kept) = &mut self.kept[index]
+            {
+                kept.info.name = pasted_name(index == LEFT);
+            }
+        }
+        self.relabel_books();
+        self.binary_notice = self.side_note();
+        if self.progress_text.is_some() {
+            self.progress_text = self.parsing_text();
+        }
+        self.keys_input.update(cx, |state, cx| {
+            state.set_placeholder(tr(toolbar::KEYS_PLACEHOLDER), window, cx)
+        });
+        self.relabel_bars(window, cx);
+        cx.notify();
+    }
+
     /// The status note: the parse progress while a side parses, else the last notice, else the
     /// note on a binary-looking side.
     pub fn notice(&self) -> Option<&str> {
@@ -608,20 +679,23 @@ impl TableView {
             .update(cx, |state, cx| state.set_value(keys, window, cx));
     }
 
-    /// "“a.csv” looks like a binary file, not CSV or TSV." for each side that does.
-    fn binary_note(&self) -> Option<SharedString> {
-        let notes: Vec<String> = self
+    /// "“a.csv” looks like a binary file, not CSV or TSV." for each side that does, then what a
+    /// workbook's read has to say.
+    fn side_note(&self) -> Option<SharedString> {
+        let mut notes: Vec<String> = self
             .kept
             .iter()
             .flatten()
             .filter(|kept| kept.binary)
             .map(|kept| {
-                format!(
+                trf(
                     "“{}” looks like a binary file, not CSV or TSV.",
-                    kept.info.name
+                    &[&kept.info.name],
                 )
             })
             .collect();
+        notes.extend(self.book_notes());
+        notes.extend(self.pair_notes());
         (!notes.is_empty()).then(|| notes.join(" ").into())
     }
 
@@ -634,8 +708,9 @@ impl TableView {
         &self.prefs
     }
 
-    /// The tab's badge (R11): "ok" for identical tables, otherwise the rows that are not the
-    /// same; "!" when a side did not open; None while busy or without a result.
+    /// The tab's badge (R11): "ok" for identical tables, "≈" for no difference in what was
+    /// compared when that was not all there is (other sheets, a cut sheet), otherwise the rows that
+    /// are not the same; "!" when a side did not open; None while busy or without a result.
     pub fn badge(&self) -> Option<String> {
         if self.is_busy() {
             return None;
@@ -645,7 +720,11 @@ impl TableView {
         }
         let diff = self.diff.as_ref()?;
         if diff.is_identical() {
-            return Some(badge_text(0));
+            return Some(if self.vouches_for_all() {
+                badge_text(0)
+            } else {
+                "≈".to_owned()
+            });
         }
         let counts = &diff.counts;
         match counts.differs + counts.left_only + counts.right_only {
@@ -683,6 +762,12 @@ impl TableView {
         // Pasted text stays on a side the open did not name, if its path did not change.
         let named = std::mem::take(&mut self.opened);
         let paths = [left, right];
+        // A side that shows another file starts on that file's default sheet.
+        for index in [LEFT, RIGHT] {
+            if self.paths[index] != paths[index] || named[index] {
+                self.sheet_picks[index] = None;
+            }
+        }
         self.pasted =
             [LEFT, RIGHT].map(|i| self.pasted[i] && !named[i] && self.paths[i] == paths[i]);
         self.paths = paths;
@@ -706,6 +791,7 @@ impl TableView {
         self.kept.swap(LEFT, RIGHT);
         self.tables.swap(LEFT, RIGHT);
         self.messages.swap(LEFT, RIGHT);
+        self.sheet_picks.swap(LEFT, RIGHT);
         for index in [LEFT, RIGHT] {
             if self.pasted[index]
                 && let Some(kept) = &mut self.kept[index]
@@ -713,7 +799,7 @@ impl TableView {
                 kept.info.name = pasted_name(index == LEFT);
             }
         }
-        self.binary_notice = self.binary_note();
+        self.binary_notice = self.side_note();
         cx.emit(TableEvent::Swapped {
             left: self.paths[LEFT].clone(),
             right: self.paths[RIGHT].clone(),
@@ -728,8 +814,14 @@ impl TableView {
     }
 
     fn side_job(&self, index: usize, mode: Mode) -> Option<SideJob> {
-        if mode == Mode::Recompare {
-            return None;
+        match mode {
+            Mode::Recompare => return None,
+            // The other side keeps its table, if a load in progress has left it one.
+            Mode::Resheet(side) if side != index && self.tables[index].is_some() => return None,
+            _ => {}
+        }
+        if sheet::reads_as_book(&self.paths[index], self.pasted[index]) {
+            return self.book_job(index, mode);
         }
         // A file side's kept text is parsed again only when its table finished loading: while
         // a newer file (or F5) is still loading, the kept text is the old file's. `start` asks
@@ -748,6 +840,7 @@ impl TableView {
         let name = match &source {
             Source::File(path) => file_name(path),
             Source::Kept(kept) => kept.info.name.clone(),
+            Source::Book(_) => file_name(&self.paths[index]),
         };
         Some(SideJob {
             name,
@@ -766,6 +859,7 @@ impl TableView {
             mode
         };
         let jobs: [Option<SideJob>; 2] = std::array::from_fn(|i| self.side_job(i, mode));
+        let has_job = [jobs[LEFT].is_some(), jobs[RIGHT].is_some()];
         let (generation, cancel) = self.job.start();
         self.cancelled = false;
         self.notice = None;
@@ -778,31 +872,22 @@ impl TableView {
             if mode != Mode::Refresh {
                 self.clear_diff();
             }
-            self.tables = [None, None];
-            self.messages = [None, None];
+            // A side with no job keeps its table (a workbook a delimiter change does not
+            // touch, the side a sheet pick leaves alone).
+            for index in [LEFT, RIGHT] {
+                if has_job[index] {
+                    self.tables[index] = None;
+                    self.messages[index] = None;
+                }
+            }
         }
         let options = self.prefs.compare_options();
         let made_with = options.clone();
         let progress = self.progress.clone();
         let background = cx.background_executor().clone();
         self.task = Some(cx.spawn(async move |this, cx| {
-            let [left_job, right_job] = jobs;
-            let spawn_side = |job: Option<SideJob>, progress: Arc<Progress>| {
-                let cancel = cancel.clone();
-                job.map(|job| background.spawn(async move { load_side(job, &cancel, &progress) }))
-            };
-            let left = spawn_side(left_job, progress[LEFT].clone());
-            let right = spawn_side(right_job, progress[RIGHT].clone());
-            let left = match left {
-                Some(task) => Some(task.await),
-                None => None,
-            };
-            let right = match right {
-                Some(task) => Some(task.await),
-                None => None,
-            };
-            let Ok(Some((a, b))) =
-                this.update(cx, |view, cx| view.loaded(generation, [left, right], cx))
+            let results = sheet::run_jobs(&background, jobs, &cancel, &progress).await;
+            let Ok(Some((a, b))) = this.update(cx, |view, cx| view.loaded(generation, results, cx))
             else {
                 return;
             };
@@ -847,10 +932,9 @@ impl TableView {
             let per_row = self.progress[index].bytes_per_row.load(Ordering::Relaxed);
             (per_row != 0).then(|| {
                 let rows = self.progress[index].done.load(Ordering::Relaxed) / per_row;
-                format!(
+                trf(
                     "Parsing {}… {} rows",
-                    self.side_name(index),
-                    format_size(rows)
+                    &[&self.side_name(index), &format_size(rows)],
                 )
             })
         })
@@ -866,20 +950,41 @@ impl TableView {
         cx: &mut Context<Self>,
     ) -> Option<(Option<Arc<Table>>, Option<Arc<Table>>)> {
         if !self.job.is_current(generation) {
+            // A table of millions of cells takes a while to free, and no frame should wait for it.
+            cx.background_executor()
+                .spawn(async move { drop(results) })
+                .detach();
             return None;
         }
         for (index, result) in results.into_iter().enumerate() {
             match result {
                 None => {}
-                Some(Ok(loaded)) => {
+                Some(Ok(mut loaded)) => {
+                    if loaded.pick_gone {
+                        self.sheet_picks[index] = None;
+                    }
+                    // Built on the job's thread: said again here, in the language now in force.
+                    if let Some(book) = &mut loaded.kept.info.book {
+                        book.relabel();
+                    }
                     self.tables[index] = Some(loaded.table);
                     self.kept[index] = Some(loaded.kept);
                     self.messages[index] = None;
                 }
-                Some(Err(SideError::Message(message))) => {
+                Some(Err(SideError::Message(mut message))) => {
                     self.tables[index] = None;
                     self.kept[index] = None;
-                    self.messages[index] = Some(message.into());
+                    // Built on the job's thread: said again here, in the language now in force.
+                    message.relabel();
+                    self.messages[index] = Some(message);
+                }
+                Some(Err(SideError::Sheet { kept, mut message })) => {
+                    self.tables[index] = None;
+                    self.kept[index] = Some(*kept);
+                    // The pick is what failed: F5 goes back to the default rule, not to it.
+                    self.sheet_picks[index] = None;
+                    message.relabel();
+                    self.messages[index] = Some(message);
                 }
                 Some(Err(SideError::Cancelled)) => {
                     self.job.finish(generation);
@@ -888,7 +993,7 @@ impl TableView {
                 }
             }
         }
-        self.binary_notice = self.binary_note();
+        self.binary_notice = self.side_note();
         cx.notify();
         if self.messages.iter().any(Option::is_some) {
             self.job.finish(generation);
@@ -942,12 +1047,12 @@ impl TableView {
             self.warned_keys = None;
         } else {
             if self.warned_keys.as_ref() != Some(spec) {
-                let mut notice = format!(
+                let mut notice = trf(
                     "Key column not found on both sides: {}.",
-                    diff.bad_keys.join(", ")
+                    &[&diff.bad_keys.join(", ")],
                 );
                 if diff.keys.is_empty() {
-                    notice.push_str(" Rows are aligned by order.");
+                    notice.push_str(tr(" Rows are aligned by order."));
                 }
                 notices.push(notice);
             }
@@ -955,7 +1060,7 @@ impl TableView {
         }
         if self.compared_options.header && diff.matched.is_empty() && !diff.columns.is_empty() {
             notices.push(
-                "No column names match. Turn off “First row is a header” to compare by position."
+                tr("No column names match. Turn off “First row is a header” to compare by position.")
                     .to_owned(),
             );
         }
@@ -996,13 +1101,23 @@ impl TableView {
         self.task = None;
         self.ticker = None;
         self.cancelled = true;
+        // A side kept from a file the tab no longer holds (an open stopped before it landed)
+        // would keep its old name on the label: it goes, and the label names the new file.
+        for side in [LEFT, RIGHT] {
+            let stale = self.kept[side]
+                .as_ref()
+                .is_some_and(|kept| kept.info.path.as_ref() != Some(&self.paths[side]));
+            if stale && !self.pasted[side] {
+                self.kept[side] = None;
+            }
+        }
         // An F5 stopped before its files landed: the tables of the result still shown are
         // the current ones again, so Export and a recompare work on them.
         if self.diff.is_some() && self.tables.iter().all(Option::is_none) {
             self.tables = self.compared.clone();
         }
         self.progress_text = None;
-        self.notice = Some(CANCELLED.into());
+        self.notice = Some(tr(CANCELLED).into());
         cx.notify();
     }
 
@@ -1211,9 +1326,9 @@ impl TableView {
         let stops = &self.view.stops;
         if stops.is_empty() {
             let note = if self.prefs.filter == Filter::Same {
-                "The “Same” filter has no differing rows."
+                tr("The “Same” filter has no differing rows.")
             } else {
-                "No differing rows."
+                tr("No differing rows.")
             };
             self.notice = Some(note.into());
             cx.notify();
@@ -1239,9 +1354,9 @@ impl TableView {
         };
         let Some(pos) = target else {
             let note = if matches!(jump, Jump::Next) {
-                "No more differences."
+                tr("No more differences.")
             } else {
-                "No earlier differences."
+                tr("No earlier differences.")
             };
             self.notice = Some(note.into());
             cx.notify();
@@ -1258,9 +1373,9 @@ impl TableView {
         if let Some(message) = self.messages.iter().flatten().next() {
             message.to_string()
         } else if self.is_busy() {
-            "Comparing…".to_owned()
+            tr("Comparing…").to_owned()
         } else if self.cancelled {
-            CANCELLED.to_owned()
+            tr(CANCELLED).to_owned()
         } else {
             String::new()
         }
@@ -1287,7 +1402,7 @@ impl Render for TableView {
                 .items_center()
                 .justify_center()
                 .text_color(palette.muted)
-                .child(summary)
+                .prose(summary)
                 .into_any_element()
         };
         let root = v_flex()
@@ -1326,6 +1441,7 @@ impl Render for TableView {
             .on_action(filter_key!(cx, TableShowAll, Filter::All))
             .on_action(filter_key!(cx, TableShowDiffs, Filter::Differences))
             .on_action(filter_key!(cx, TableShowSame, Filter::Same));
+        let root = Self::bind_sheet_keys(root, cx);
         Self::bind_actions(root, cx)
             .child(self.render_toolbar(&palette, &fonts, cx))
             .child(self.render_options(&palette, &fonts, cx))

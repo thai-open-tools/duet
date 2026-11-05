@@ -8,16 +8,21 @@ use duet_core::text::save::{SaveError, SaveRequest, save};
 use gpui_kit::ClipboardItem;
 
 use super::*;
+use crate::i18n::errors::save_error;
 use crate::paths::home_dir;
 use crate::text::saving::UNSAVED_ANSWERS;
 
 /// The dialog's file name when the left has none (`suggestName`).
 const DEFAULT_NAME: &str = "merged.txt";
-const NOT_MERGED: &str = "Nothing merged yet: press Merge first.";
+const NOT_MERGED: &str = tr_key("Nothing merged yet: press Merge first.");
 const NOT_FULL_OUTPUT: &str =
-    "Type a full path for the output file, such as C:\\folder\\merged.txt.";
-const OUTPUT_IS_FOLDER: &str = "The output must be a file, not a folder.";
-const MARKERS_DETAIL: &str = "Saving now writes them as conflict markers: <<<<<<< left … ||||||| base … ======= … >>>>>>> right";
+    tr_key("Type a full path for the output file, such as C:\\folder\\merged.txt.");
+const OUTPUT_IS_FOLDER: &str = tr_key("The output must be a file, not a folder.");
+const MARKERS_DETAIL: &str = tr_key(
+    "Saving now writes them as conflict markers: <<<<<<< left … ||||||| base … ======= … >>>>>>> right",
+);
+const MARKERS_ANSWERS: [&str; 2] = [tr_key("Cancel"), tr_key("Save with conflict markers")];
+const UTF8_ANSWERS: [&str; 2] = [tr_key("Cancel"), tr_key("Save as UTF-8")];
 
 /// What a write is for: Save keeps the path as the output and clears the dirty flag.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -126,14 +131,14 @@ impl MergeView {
         // A field with the keys gives them back first, which ends its edit (R7).
         self.leave_input(window, cx);
         let Some(session) = self.session.as_ref() else {
-            self.show_notice(NOT_MERGED, cx);
+            self.show_notice(tr(NOT_MERGED), cx);
             return Task::ready(false);
         };
         let open = session.unresolved();
         // A typed output is checked before anything is asked (I2).
         let fixed = match self.output.as_deref().filter(|_| !choose).map(output_path) {
             Some(Err(problem)) => {
-                self.show_notice(problem, cx);
+                self.show_notice(tr(problem), cx);
                 return Task::ready(false);
             }
             Some(Ok(path)) => Some(path),
@@ -144,12 +149,12 @@ impl MergeView {
         }
         let answer = window.prompt(
             PromptLevel::Warning,
-            &format!(
+            &trf(
                 "{} not resolved.",
-                count_of(open as u64, "conflict is", "conflicts are")
+                &[&count_of(open as u64, "conflict is", "conflicts are")],
             ),
-            Some(MARKERS_DETAIL),
-            &["Cancel", "Save with conflict markers"],
+            Some(tr(MARKERS_DETAIL)),
+            &answers(&MARKERS_ANSWERS),
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -179,7 +184,7 @@ impl MergeView {
     pub fn export_markers(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Task<bool> {
         self.leave_input(window, cx);
         if self.session.is_none() {
-            self.show_notice(NOT_MERGED, cx);
+            self.show_notice(tr(NOT_MERGED), cx);
             return Task::ready(false);
         }
         let name = conflicts_name(&self.suggest_name());
@@ -234,12 +239,12 @@ impl MergeView {
                 let Ok(answer) = this.update_in(cx, |_, window, cx| {
                     window.prompt(
                         PromptLevel::Warning,
-                        &format!(
+                        &trf(
                             "The result has characters {} can't hold.",
-                            snapshot.encoding.encoding.name()
+                            &[&snapshot.encoding.encoding.name()],
                         ),
-                        Some("Save it as UTF-8 instead?"),
-                        &["Cancel", "Save as UTF-8"],
+                        Some(tr("Save it as UTF-8 instead?")),
+                        &answers(&UTF8_ANSWERS),
                         cx,
                     )
                 }) else {
@@ -277,17 +282,21 @@ impl MergeView {
     ) {
         let shown = path.display();
         let notice = match (outcome, purpose) {
-            (Err(err), Purpose::Save) => format!("Can't save: {err}. The file was not changed."),
-            (Err(err), Purpose::Export) => {
-                format!("Can't export: {err}. The file was not changed.")
-            }
+            (Err(err), Purpose::Save) => trf(
+                "Can't save: {}. The file was not changed.",
+                &[&save_error(&err)],
+            ),
+            (Err(err), Purpose::Export) => trf(
+                "Can't export: {}. The file was not changed.",
+                &[&save_error(&err)],
+            ),
             (Ok(_), Purpose::Export) => {
                 let how = if snapshot.unresolved == 0 {
-                    "no conflicts left".to_owned()
+                    tr("no conflicts left").to_owned()
                 } else {
-                    format!("{} as markers", markers(snapshot.unresolved))
+                    trf("{} as markers", &[&markers(snapshot.unresolved)])
                 };
-                format!("Exported: {shown} ({how}).")
+                trf("Exported: {} ({}).", &[&shown, &how])
             }
             (Ok(_), Purpose::Save) => {
                 self.set_output(Some(path.to_path_buf()), window, cx);
@@ -297,18 +306,19 @@ impl MergeView {
                 {
                     session.mark_saved();
                 }
-                let mut text = format!("Saved the result: {shown}");
+                let mut extra = String::new();
                 if as_utf8 {
-                    text.push_str(" (as UTF-8)");
+                    extra.push(' ');
+                    extra.push_str(tr("(as UTF-8)"));
                 }
                 if snapshot.unresolved > 0 {
-                    text.push_str(&format!(
-                        " ({} written as markers)",
-                        markers(snapshot.unresolved)
+                    extra.push(' ');
+                    extra.push_str(&trf(
+                        "({} written as markers)",
+                        &[&markers(snapshot.unresolved)],
                     ));
                 }
-                text.push('.');
-                text
+                trf("Saved the result: {}{}.", &[&shown, &extra])
             }
         };
         self.notice = Some(notice.into());
@@ -318,20 +328,21 @@ impl MergeView {
     /// Copy result (`js:340-359`): the whole result, unresolved conflicts as markers.
     pub fn copy_result(&mut self, cx: &mut Context<Self>) {
         let Some(session) = self.session.as_ref() else {
-            self.show_notice(NOT_MERGED, cx);
+            self.show_notice(tr(NOT_MERGED), cx);
             return;
         };
         let lines = session.result_line_count();
         let open = session.unresolved();
         cx.write_to_clipboard(ClipboardItem::new_string(session.result_text()));
-        let mut text = format!(
-            "Copied the result: {}",
-            count_of(lines as u64, "line", "lines")
+        let extra = if open > 0 {
+            trf(", {} as markers", &[&markers(open)])
+        } else {
+            String::new()
+        };
+        let text = trf(
+            "Copied the result: {}{}.",
+            &[&count_of(lines as u64, "line", "lines"), &extra],
         );
-        if open > 0 {
-            text.push_str(&format!(", {} as markers", markers(open)));
-        }
-        text.push('.');
         self.show_notice(text, cx);
     }
 
@@ -347,9 +358,9 @@ impl MergeView {
         }
         let answer = window.prompt(
             PromptLevel::Warning,
-            "Save the merge result?",
-            Some("Your conflict choices are lost if you don't save them."),
-            &UNSAVED_ANSWERS,
+            tr("Save the merge result?"),
+            Some(tr("Your conflict choices are lost if you don't save them.")),
+            &answers(&UNSAVED_ANSWERS),
             cx,
         );
         cx.spawn_in(window, async move |this, cx| match answer.await {

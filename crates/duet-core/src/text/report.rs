@@ -6,6 +6,7 @@ use std::ops::Range;
 
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::i18n::{scoped_lang, tr, trf};
 use crate::text::diff::LineDiff;
 use crate::text::document::TextDocument;
 use crate::text::inline::{InlineDiff, refine};
@@ -208,23 +209,28 @@ pub fn text_report(
     meta: &ReportMeta,
 ) -> String {
     let mut out = format!(
-        "\u{feff}duet: text compare report\r\nLeft : {}\r\nRight: {}\r\nDate : {}\r\n{}\r\n\r\n",
-        meta.left, meta.right, meta.date, meta.status
+        "\u{feff}{}\r\n{}\r\n{}\r\n{}\r\n{}\r\n\r\n",
+        tr("duet: text compare report"),
+        trf("Left : {}", &[&meta.left]),
+        trf("Right: {}", &[&meta.right]),
+        trf("Date : {}", &[&meta.date]),
+        meta.status
     );
     let place = |r: &Range<u32>| {
         if r.end > r.start {
             format!("{}-{}", r.start + 1, r.end)
         } else {
-            format!("insert at {}", r.start + 1)
+            trf("insert at {}", &[&(r.start + 1)])
         }
     };
     for (i, h) in diff.hunks.iter().enumerate() {
         let _ = write!(
             out,
-            "=== Difference {} · Left {} · Right {} ===\r\n",
-            i + 1,
-            place(&h.left),
-            place(&h.right)
+            "{}\r\n",
+            trf(
+                "=== Difference {} · Left {} · Right {} ===",
+                &[&(i + 1), &place(&h.left), &place(&h.right)]
+            )
         );
         for a in h.left.clone() {
             let _ = write!(out, "< {}\r\n", left.line(a as usize));
@@ -362,10 +368,6 @@ fn thousands(n: u64) -> String {
     shown
 }
 
-fn count_of(n: u64, one: &str, many: &str) -> String {
-    format!("{} {}", thousands(n), if n == 1 { one } else { many })
-}
-
 /// The row ranges `mode` keeps. O(hunks): the differences come from the map's change blocks.
 #[allow(clippy::single_range_in_vec_init)]
 fn kept_ranges(rows: &RowMap, mode: ReportMode) -> Vec<Range<u32>> {
@@ -432,7 +434,17 @@ pub fn html_report(
     let mut body = String::new();
     let mut shown = 0usize;
     let mut position = 0u32;
-    let unchanged = |n: u32| count_of(n.into(), "unchanged line", "unchanged lines");
+    let unchanged = |n: u32| {
+        format!(
+            "{} {}",
+            thousands(n.into()),
+            if n == 1 {
+                tr("unchanged line")
+            } else {
+                tr("unchanged lines")
+            }
+        )
+    };
     let mut stopped = false;
     'ranges: for range in kept_ranges(rows, mode) {
         let mut hidden = range.start - position;
@@ -440,9 +452,9 @@ pub fn html_report(
             if shown == max_rows {
                 skip_row(
                     &mut body,
-                    &format!(
+                    &trf(
                         "The report stops here: more than {} rows.",
-                        thousands(max_rows as u64)
+                        &[&thousands(max_rows as u64)],
                     ),
                 );
                 stopped = true;
@@ -504,9 +516,12 @@ pub fn html_report(
     escape(meta.right, &mut r);
     escape(meta.status, &mut status);
     escape(meta.date, &mut date);
+    let lang = scoped_lang().unwrap_or_default().code();
+    let (title, left_label, right_label) = (tr("Text compare report"), tr("Left:"), tr("Right:"));
+    let made = trf("Made {} with duet", &[&date]);
     format!(
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>duet — {head}</title><style>{CSS}</style></head><body>\
-<h1>Text compare report</h1><div class=\"meta\">Left: <b>{l}</b><br>Right: <b>{r}</b><br>{status}<br>Made {date} with duet</div>\
+        "<!DOCTYPE html><html lang=\"{lang}\"><head><meta charset=\"utf-8\"><title>duet — {head}</title><style>{CSS}</style></head><body>\
+<h1>{title}</h1><div class=\"meta\">{left_label} <b>{l}</b><br>{right_label} <b>{r}</b><br>{status}<br>{made}</div>\
 <table><colgroup><col style=\"width:56px\"><col><col style=\"width:56px\"><col></colgroup>{body}</table></body></html>"
     )
 }

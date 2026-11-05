@@ -3,6 +3,7 @@
 //! escaped; the line cells come from the text tab's `html_line`, so both reports mark characters,
 //! tabs and invisible characters alike.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
@@ -11,10 +12,11 @@ use chrono::NaiveDateTime;
 use crate::folder::report::lines::{DetailRow, LineDetails, LineInfo, RowClass, line_summary};
 use crate::folder::report::{
     Attention, ItemState, NOT_SCANNED_HINT, ReportContext, ReportCounts, ReportItem, ReportOptions,
-    attention, count_text, criterion_text, human_bytes, percent, report_counts, top_groups,
-    unimportant_reason,
+    attention, count_text, criterion_text, human_bytes, moved_note, percent, report_counts,
+    top_groups, unimportant_reason,
 };
 use crate::folder::run::CompareMode;
+use crate::i18n::{Lang, scoped, tr, trf};
 use crate::text::report::html_line;
 
 #[cfg(test)]
@@ -104,6 +106,10 @@ const JS: &str = concat!(
     "})();",
 );
 
+/// The one line of `JS` that holds English text: the count of the files shown.
+const EN_COUNT: &str =
+    "cnt.textContent=\"Showing \"+n.toLocaleString()+(n===1?\" file\":\" files\");";
+
 /// Rows shown for one attention kind, and names listed for clean folders.
 const ATTENTION_LINKS: usize = 60;
 const CLEAN_FOLDERS: usize = 40;
@@ -149,7 +155,7 @@ fn files(n: usize) -> String {
 
 fn date_text(time: Option<NaiveDateTime>) -> String {
     time.map_or_else(
-        || "unknown".to_owned(),
+        || tr("unknown").to_owned(),
         |time| time.format("%Y-%m-%d %H:%M").to_string(),
     )
 }
@@ -163,7 +169,11 @@ fn base_of(rel: &str) -> &str {
 }
 
 fn dir_label(dir: &str) -> &str {
-    if dir.is_empty() { "(top level)" } else { dir }
+    if dir.is_empty() {
+        tr("(top level)")
+    } else {
+        dir
+    }
 }
 
 fn state_key(state: ItemState) -> &'static str {
@@ -186,10 +196,10 @@ fn state_rank(state: ItemState) -> u8 {
 
 fn state_label(state: ItemState, names: &[String; 2]) -> String {
     match state {
-        ItemState::Different => "Different".to_owned(),
-        ItemState::LeftOnly => format!("Only in {}", names[0]),
-        ItemState::RightOnly => format!("Only in {}", names[1]),
-        ItemState::Same => "Same".to_owned(),
+        ItemState::Different => tr("Different").to_owned(),
+        ItemState::LeftOnly => trf("Only in {}", &[&names[0]]),
+        ItemState::RightOnly => trf("Only in {}", &[&names[1]]),
+        ItemState::Same => tr("Same").to_owned(),
     }
 }
 
@@ -296,8 +306,11 @@ fn detail_table(out: &mut String, rows: &[DetailRow], names: &[String; 2], tab: 
             DetailRow::More(n) => {
                 let _ = write!(
                     out,
-                    "<tr class=\"skip more\"><td colspan=\"4\">… {}: open this file in duet to see them all</td></tr>",
-                    count_text(*n as u64, "more row", "more rows")
+                    "<tr class=\"skip more\"><td colspan=\"4\">{}</td></tr>",
+                    trf(
+                        "… {}: open this file in duet to see them all",
+                        &[&count_text(*n as u64, "more row", "more rows")]
+                    )
                 );
             }
         }
@@ -358,49 +371,41 @@ impl<'a> Page<'a> {
         let mut msg = if let Some(note) = info.and_then(|info| info.note.as_ref()) {
             note.clone()
         } else if item.error.is_some() {
-            "Could not read the file: the contents were not compared.".to_owned()
+            tr("Could not read the file: the contents were not compared.").to_owned()
         } else if item.case_only() {
             let spell = |side: &Option<crate::folder::report::SideFacts>| {
                 side.as_ref().map(|s| s.rel.clone()).unwrap_or_default()
             };
-            format!(
+            trf(
                 "Same contents; the names differ only in case: {} / {}",
-                spell(&item.left),
-                spell(&item.right)
+                &[&spell(&item.left), &spell(&item.right)],
             )
         } else if item.format_only()
             && let Some([a, b]) = formats
         {
-            format!(
+            trf(
                 "Every line matches; only the file format differs — {}: {} · {}: {}",
-                names[0],
-                a.describe(),
-                names[1],
-                b.describe()
+                &[&names[0], &a.describe(), &names[1], &b.describe()],
             )
         } else if !self.context.reads_contents {
             if self.context.criterion == criterion_text(CompareMode::Size) {
-                "Compared by size (contents not read)".to_owned()
+                tr("Compared by size (contents not read)").to_owned()
             } else {
-                "Compared by time and size (contents not read)".to_owned()
+                tr("Compared by time and size (contents not read)").to_owned()
             }
         } else if self.options.details {
             String::new()
         } else {
-            "Differing lines were not requested".to_owned()
+            tr("Differing lines were not requested").to_owned()
         };
         if !msg.is_empty()
             && item.note.as_ref().is_some_and(|note| note.soft)
             && let Some([a, b]) = formats
         {
-            let _ = write!(
-                msg,
+            msg.push_str(&trf(
                 " · {}: {} / {}: {}",
-                names[0],
-                a.describe(),
-                names[1],
-                b.describe()
-            );
+                &[&names[0], &a.describe(), &names[1], &b.describe()],
+            ));
         }
         msg
     }
@@ -437,18 +442,16 @@ impl<'a> Page<'a> {
             };
             let _ = write!(
                 head,
-                "<span class=\"when\">{} was modified later</span>",
-                esc(name)
+                "<span class=\"when\">{}</span>",
+                trf("{} was modified later", &[&esc(name)])
             );
         }
         let facts = |side: &Option<crate::folder::report::SideFacts>, name: &str| match side {
-            Some(s) => format!(
+            Some(s) => trf(
                 "{}: {} · modified {}",
-                esc(name),
-                human_bytes(s.len),
-                date_text(s.modified)
+                &[&esc(name), &human_bytes(s.len), &date_text(s.modified)],
             ),
-            None => format!("Not in {}", esc(name)),
+            None => trf("Not in {}", &[&esc(name)]),
         };
         let data_p = esc(&item.rel.to_lowercase());
         let key = state_key(item.state);
@@ -476,17 +479,15 @@ impl<'a> Page<'a> {
         // One-sided and same files: one row, nothing to open.
         let side = match item.state {
             ItemState::LeftOnly => item.left.as_ref().map(|s| {
-                format!(
+                trf(
                     "{} · modified {}",
-                    human_bytes(s.len),
-                    date_text(s.modified)
+                    &[&human_bytes(s.len), &date_text(s.modified)],
                 )
             }),
             ItemState::RightOnly => item.right.as_ref().map(|s| {
-                format!(
+                trf(
                     "{} · modified {}",
-                    human_bytes(s.len),
-                    date_text(s.modified)
+                    &[&human_bytes(s.len), &date_text(s.modified)],
                 )
             }),
             _ => item.left.as_ref().map(|s| human_bytes(s.len)),
@@ -511,11 +512,12 @@ impl<'a> Page<'a> {
         };
         let _ = write!(
             out,
-            "<h3 class=\"sub\"><span class=\"sw {css}\"></span>{} Only in {} (not in {}) — {}</h3>",
+            "<h3 class=\"sub\"><span class=\"sw {css}\"></span>{} {}</h3>",
             state_symbol(state),
-            esc(mine),
-            esc(other),
-            files(list.len())
+            trf(
+                "Only in {} (not in {}) — {}",
+                &[&esc(mine), &esc(other), &files(list.len())]
+            )
         );
         let mut whole: HashMap<&str, Vec<&ReportItem>> = HashMap::new();
         let mut part: HashMap<&str, Vec<&ReportItem>> = HashMap::new();
@@ -539,12 +541,24 @@ impl<'a> Page<'a> {
                 Some(dir) => item.rel.get(dir.len() + 1..).unwrap_or(&item.rel),
                 None => base_of(&item.rel),
             };
+            let moved = moved_note(item, names);
+            let title = trf("{} · modified {}", &[&item.rel, &date_text(modified)]);
+            let (title, moved) = match moved {
+                Some(note) => (
+                    format!("{title} · {note}"),
+                    format!(
+                        " <span class=\"sz\" style=\"white-space:normal\">{}</span>",
+                        esc(&note)
+                    ),
+                ),
+                None => (title, String::new()),
+            };
             format!(
-                "<li class=\"it\" id=\"f{}\" data-st=\"{}\" data-p=\"{}\" title=\"{}\">{} <span class=\"sz\">{}</span></li>",
+                "<li class=\"it\" id=\"f{}\" data-st=\"{}\" data-p=\"{}\" title=\"{}\">{} <span class=\"sz\">{}</span>{moved}</li>",
                 ids.get(item.rel.as_str()).copied().unwrap_or_default(),
                 state_key(state),
                 esc(&item.rel.to_lowercase()),
-                esc(&format!("{} · modified {}", item.rel, date_text(modified))),
+                esc(&title),
                 esc(name),
                 human_bytes(len)
             )
@@ -554,13 +568,14 @@ impl<'a> Page<'a> {
             let total: u64 = group.iter().map(|item| size_of(item).0).sum();
             let _ = write!(
                 out,
-                "<div class=\"og box\">{}<div class=\"oh\"><span class=\"mono\">📁 {}/</span><span class=\"pill {}\"><i></i>The whole folder is missing in {}</span><span class=\"info\">{} · {}</span></div><details><summary>File list</summary><ul class=\"fl\">",
+                "<div class=\"og box\">{}<div class=\"oh\"><span class=\"mono\">📁 {}/</span><span class=\"pill {}\"><i></i>{}</span><span class=\"info\">{} · {}</span></div><details><summary>{}</summary><ul class=\"fl\">",
                 self.anchors_for(dir),
                 esc(dir),
                 state_key(state),
-                esc(other),
+                trf("The whole folder is missing in {}", &[&esc(other)]),
                 files(group.len()),
-                human_bytes(total)
+                human_bytes(total),
+                tr("File list")
             );
             for item in group {
                 out.push_str(&li(item, Some(dir), &self.ids));
@@ -599,6 +614,7 @@ pub fn folder_html(
     options: &ReportOptions,
     context: &ReportContext,
 ) -> String {
+    let _lang = scoped(options.lang);
     let names = &options.names;
     let counts = report_counts(items);
     let mut out = String::with_capacity(CSS.len() + JS.len() + 8192 + items.len() * 480);
@@ -624,18 +640,20 @@ pub fn folder_html(
     };
 
     let title = if options.title.is_empty() {
-        format!("{} compared with {}", names[0], names[1])
+        trf("{} compared with {}", &[&names[0], &names[1]])
     } else {
         options.title.clone()
     };
     let _ = write!(
         out,
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{} — folder compare report</title><style>{CSS}</style></head><body><div class=\"wrap\">",
-        esc(&title)
+        "<!DOCTYPE html><html lang=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><style>{CSS}</style></head><body><div class=\"wrap\">",
+        options.lang.code(),
+        trf("{} — folder compare report", &[&esc(&title)])
     );
     let _ = write!(
         out,
-        "<div class=\"brand\"><span>duet · folder compare report</span><span>{}</span></div><h1>{}</h1>",
+        "<div class=\"brand\"><span>{}</span><span>{}</span></div><h1>{}</h1>",
+        tr("duet · folder compare report"),
         context.generated.format("%Y-%m-%d %H:%M"),
         esc(&title)
     );
@@ -655,8 +673,10 @@ pub fn folder_html(
     if options.unimportant && !unimportant.is_empty() {
         let _ = write!(
             out,
-            "<h2>Differs only in unimportant parts<small>counted as Same · {}</small></h2><details class=\"sec\"><summary>Show the list</summary><ul>",
-            files(unimportant.len())
+            "<h2>{}<small>{}</small></h2><details class=\"sec\"><summary>{}</summary><ul>",
+            tr("Differs only in unimportant parts"),
+            trf("counted as Same · {}", &[&files(unimportant.len())]),
+            tr("Show the list")
         );
         for item in &unimportant {
             let _ = write!(
@@ -671,11 +691,14 @@ pub fn folder_html(
     legend(&mut out, options);
     let _ = write!(
         out,
-        "<footer>Made with duet {} · works offline; no data leaves this computer</footer></div>",
-        esc(&context.version)
+        "<footer>{}</footer></div>",
+        trf(
+            "Made with duet {} · works offline; no data leaves this computer",
+            &[&esc(&context.version)]
+        )
     );
     if !detail.is_empty() {
-        let _ = write!(out, "<script>{JS}</script>");
+        let _ = write!(out, "<script>{}</script>", js(options.lang));
     }
     out.push_str("</body></html>");
     out
@@ -719,21 +742,37 @@ fn config_line(
 ) {
     let _ = write!(
         out,
-        "<div class=\"cfg\">Criterion: <b>{}</b> · Scope: <b>{}</b>",
+        "<div class=\"cfg\">{}: <b>{}</b> · {}: <b>{}</b>",
+        tr("Criterion"),
         esc(&context.criterion),
+        tr("Scope"),
         esc(&context.scope)
     );
     if !context.include.is_empty() {
-        let _ = write!(out, " · Include: <b>{}</b>", esc(&context.include));
+        let _ = write!(
+            out,
+            " · {}: <b>{}</b>",
+            tr("Include"),
+            esc(&context.include)
+        );
     }
     if !context.exclude.is_empty() {
-        let _ = write!(out, " · Exclude: <b>{}</b>", esc(&context.exclude));
+        let _ = write!(
+            out,
+            " · {}: <b>{}</b>",
+            tr("Exclude"),
+            esc(&context.exclude)
+        );
     }
     if let (Some(_), Some(rules)) = (lines, &context.rules) {
-        let _ = write!(out, " · Line compare: <b>{}</b>", esc(rules));
+        let _ = write!(out, " · {}: <b>{}</b>", tr("Line compare"), esc(rules));
     }
     if let (Some(lines), true) = (lines, options.mask) {
-        out.push_str(" · <b>Values that look like passwords or keys are hidden</b>");
+        let _ = write!(
+            out,
+            " · <b>{}</b>",
+            tr("Values that look like passwords or keys are hidden")
+        );
         if lines.masked_lines > 0 {
             let _ = write!(
                 out,
@@ -745,7 +784,10 @@ fn config_line(
     if !context.invisible_scan {
         let _ = write!(
             out,
-            " · Invisible characters: <b>not scanned</b> ({NOT_SCANNED_HINT})"
+            " · {}: <b>{}</b> ({})",
+            tr("Invisible characters"),
+            tr("not scanned"),
+            tr(NOT_SCANNED_HINT)
         );
     }
     out.push_str("</div>");
@@ -772,79 +814,83 @@ fn summary(
             num(value)
         )
     };
-    out.push_str("<h2>Summary</h2><div class=\"kpis\">");
+    let _ = write!(out, "<h2>{}</h2><div class=\"kpis\">", tr("Summary"));
     out.push_str(&kpi(
         "",
-        "All files".to_owned(),
+        tr("All files").to_owned(),
         c.total,
-        format!(
+        trf(
             "Mismatched {} ({})",
-            num(mismatched),
-            percent(mismatched, c.total)
+            &[&num(mismatched), &percent(mismatched, c.total)],
         ),
     ));
     out.push_str(&kpi(
         "d",
-        "Different".to_owned(),
+        tr("Different").to_owned(),
         c.different,
-        "On both sides, contents differ".to_owned(),
+        tr("On both sides, contents differ").to_owned(),
     ));
     out.push_str(&kpi(
         "a",
-        format!("Only in {}", esc(&names[0])),
+        trf("Only in {}", &[&esc(&names[0])]),
         c.left_only,
-        format!("Not in {}", esc(&names[1])),
+        trf("Not in {}", &[&esc(&names[1])]),
     ));
     out.push_str(&kpi(
         "b",
-        format!("Only in {}", esc(&names[1])),
+        trf("Only in {}", &[&esc(&names[1])]),
         c.right_only,
-        format!("Not in {}", esc(&names[0])),
+        trf("Not in {}", &[&esc(&names[0])]),
     ));
     out.push_str(&kpi(
         "s",
-        "Same".to_owned(),
+        tr("Same").to_owned(),
         c.same,
         if c.unimportant > 0 {
-            format!(
-                "Including {} that {} only in unimportant parts",
-                num(c.unimportant),
+            trf(
                 if c.unimportant == 1 {
-                    "differs"
+                    "Including {} that differs only in unimportant parts"
                 } else {
-                    "differ"
-                }
+                    "Including {} that differ only in unimportant parts"
+                },
+                &[&num(c.unimportant)],
             )
         } else {
-            "Contents match".to_owned()
+            tr("Contents match").to_owned()
         },
     ));
     out.push_str("</div>");
     out.push_str(&bar("bar", c.left_only, c.different, c.right_only, c.same));
     let _ = write!(
         out,
-        "<div class=\"legend\"><span><span class=\"sw a\"></span>◀ Only in {} {}</span><span><span class=\"sw d\"></span>≠ Different {}</span><span><span class=\"sw b\"></span>▶ Only in {} {}</span><span><span class=\"sw s\"></span>= Same {}</span></div>",
-        esc(&names[0]),
-        percent(c.left_only, c.total),
-        percent(c.different, c.total),
-        esc(&names[1]),
-        percent(c.right_only, c.total),
-        percent(c.same, c.total)
+        "<div class=\"legend\"><span><span class=\"sw a\"></span>◀ {}</span><span><span class=\"sw d\"></span>≠ {}</span><span><span class=\"sw b\"></span>▶ {}</span><span><span class=\"sw s\"></span>= {}</span></div>",
+        trf(
+            "Only in {} {}",
+            &[&esc(&names[0]), &percent(c.left_only, c.total)]
+        ),
+        trf("Different {}", &[&percent(c.different, c.total)]),
+        trf(
+            "Only in {} {}",
+            &[&esc(&names[1]), &percent(c.right_only, c.total)]
+        ),
+        trf("Same {}", &[&percent(c.same, c.total)])
     );
 
     let mut findings: Vec<String> = Vec::new();
     if mismatched == 0 {
-        findings.push("Every file matches: nothing to check.".to_owned());
+        findings.push(tr("Every file matches: nothing to check.").to_owned());
     } else {
-        findings.push(format!(
-            "<b>{}</b> of {} files do not match: {} with different contents, {} only in {}, {} only in {}",
-            num(mismatched),
-            num(c.total),
-            num(c.different),
-            num(c.left_only),
-            esc(&names[0]),
-            num(c.right_only),
-            esc(&names[1])
+        findings.push(trf(
+            "{} of {} files do not match: {} with different contents, {} only in {}, {} only in {}",
+            &[
+                &format!("<b>{}</b>", num(mismatched)),
+                &num(c.total),
+                &num(c.different),
+                &num(c.left_only),
+                &esc(&names[0]),
+                &num(c.right_only),
+                &esc(&names[1]),
+            ],
         ));
         let mut hot: Vec<&crate::folder::report::Group> = page
             .groups
@@ -864,9 +910,9 @@ fn summary(
                     )
                 })
                 .collect();
-            findings.push(format!(
+            findings.push(trf(
                 "Folders with the most differences: {}",
-                top.join(", ")
+                &[&top.join(", ")],
             ));
         }
     }
@@ -881,14 +927,16 @@ fn summary(
             }
         }
         if read > 0 {
-            findings.push(format!(
+            findings.push(trf(
                 "Differing lines in total ({} read): {} changed · {} only in {} · {} only in {}",
-                count_text(read as u64, "file", "files"),
-                num(changed as usize),
-                num(left as usize),
-                esc(&names[0]),
-                num(right as usize),
-                esc(&names[1])
+                &[
+                    &count_text(read as u64, "file", "files"),
+                    &num(changed as usize),
+                    &num(left as usize),
+                    &esc(&names[0]),
+                    &num(right as usize),
+                    &esc(&names[1]),
+                ],
             ));
         }
     }
@@ -897,25 +945,23 @@ fn summary(
         .map(Vec::len)
         .sum::<usize>();
     if attention_total > 0 {
-        findings.push(format!(
-            "⚠ <b>{}</b> {} a closer look: see the next section",
-            num(attention_total),
+        findings.push(trf(
             if attention_total == 1 {
-                "item needs"
+                "⚠ {} item needs a closer look: see the next section"
             } else {
-                "items need"
-            }
+                "⚠ {} items need a closer look: see the next section"
+            },
+            &[&format!("<b>{}</b>", num(attention_total))],
         ));
     }
     if c.unimportant > 0 {
-        findings.push(format!(
-            "{} {} only in the file format (EOL/BOM) or in unimportant parts: counted as Same",
-            files(c.unimportant),
+        findings.push(trf(
             if c.unimportant == 1 {
-                "differs"
+                "{} differs only in the file format (EOL/BOM) or in unimportant parts: counted as Same"
             } else {
-                "differ"
-            }
+                "{} differ only in the file format (EOL/BOM) or in unimportant parts: counted as Same"
+            },
+            &[&files(c.unimportant)],
         ));
     }
     out.push_str("<ul class=\"findings\">");
@@ -950,7 +996,8 @@ fn attention_section(out: &mut String, items: &[ReportItem], page: &Page) {
     }
     let _ = write!(
         out,
-        "<h2>⚠ Needs a closer look<small>{}</small></h2>",
+        "<h2>⚠ {}<small>{}</small></h2>",
+        tr("Needs a closer look"),
         count_text(total as u64, "item", "items")
     );
     for (kind, list) in Attention::ALL.iter().zip(&groups) {
@@ -974,8 +1021,8 @@ fn attention_section(out: &mut String, items: &[ReportItem], page: &Page) {
         if list.len() > ATTENTION_LINKS {
             let _ = write!(
                 out,
-                "<li>…and {} more</li>",
-                files(list.len() - ATTENTION_LINKS)
+                "<li>{}</li>",
+                trf("…and {} more", &[&files(list.len() - ATTENTION_LINKS)])
             );
         }
         out.push_str("</ul></div>");
@@ -1003,13 +1050,20 @@ fn by_folder(out: &mut String, page: &Page, names: &[String; 2]) {
     };
     let _ = write!(
         out,
-        "<h2>By folder<small>the most different first</small></h2><table class=\"grp\"><tr><th>Folder</th><th>≠ Different</th><th>◀ Only in {}</th><th>▶ Only in {}</th><th>= Same</th><th>Total</th><th>Share</th></tr>",
-        esc(&names[0]),
-        esc(&names[1])
+        "<h2>{}<small>{}</small></h2><table class=\"grp\"><tr><th>{}</th><th>≠ {}</th><th>◀ {}</th><th>▶ {}</th><th>= {}</th><th>{}</th><th>{}</th></tr>",
+        tr("By folder"),
+        tr("the most different first"),
+        tr("Folder"),
+        tr("Different"),
+        trf("Only in {}", &[&esc(&names[0])]),
+        trf("Only in {}", &[&esc(&names[1])]),
+        tr("Same"),
+        tr("Total"),
+        tr("Share")
     );
     for g in &hot {
         let name = if g.folder.is_empty() {
-            "(top level)".to_owned()
+            tr("(top level)").to_owned()
         } else {
             format!(
                 "<a href=\"#g-{}\">{}</a>",
@@ -1037,14 +1091,19 @@ fn by_folder(out: &mut String, page: &Page, names: &[String; 2]) {
             .collect();
         let _ = write!(
             out,
-            "<p class=\"cfg\">Folders that match completely ({}): {}{}</p>",
-            num(clean.len()),
-            shown.join(", "),
-            if clean.len() > CLEAN_FOLDERS {
-                " …"
-            } else {
-                ""
-            }
+            "<p class=\"cfg\">{}</p>",
+            trf(
+                "Folders that match completely ({}): {}{}",
+                &[
+                    &num(clean.len()),
+                    &shown.join(", "),
+                    &if clean.len() > CLEAN_FOLDERS {
+                        " …"
+                    } else {
+                        ""
+                    },
+                ]
+            )
         );
     }
 }
@@ -1066,8 +1125,10 @@ fn files_section<'a>(out: &mut String, page: &mut Page<'a>, detail: &[&'a Report
     );
     let _ = write!(
         out,
-        "<h2>Files<small>{}</small></h2><div class=\"tools\"><input type=\"search\" id=\"q\" placeholder=\"Search file or folder names…\">",
-        files(detail.len())
+        "<h2>{}<small>{}</small></h2><div class=\"tools\"><input type=\"search\" id=\"q\" placeholder=\"{}\">",
+        tr("Files"),
+        files(detail.len()),
+        tr("Search file or folder names…")
     );
     for state in [
         ItemState::Different,
@@ -1086,15 +1147,21 @@ fn files_section<'a>(out: &mut String, page: &mut Page<'a>, detail: &[&'a Report
         }
     }
     if !different.is_empty() {
-        out.push_str("<button type=\"button\" id=\"exp\">Expand all differing lines</button><button type=\"button\" id=\"col\">Collapse all</button>");
+        let _ = write!(
+            out,
+            "<button type=\"button\" id=\"exp\">{}</button><button type=\"button\" id=\"col\">{}</button>",
+            tr("Expand all differing lines"),
+            tr("Collapse all")
+        );
     }
     out.push_str("<span class=\"cnt\" id=\"cnt\"></span></div>");
 
     if !different.is_empty() {
         let _ = write!(
             out,
-            "<h3 class=\"sub\"><span class=\"sw d\"></span>≠ Different contents — {}<small>Click a file name to see the differing lines</small></h3>",
-            files(different.len())
+            "<h3 class=\"sub\"><span class=\"sw d\"></span>≠ {}<small>{}</small></h3>",
+            trf("Different contents — {}", &[&files(different.len())]),
+            tr("Click a file name to see the differing lines")
         );
         let mut by_dir: HashMap<&str, Vec<&ReportItem>> = HashMap::new();
         for &item in &different {
@@ -1120,8 +1187,8 @@ fn files_section<'a>(out: &mut String, page: &mut Page<'a>, detail: &[&'a Report
     if !same.is_empty() {
         let _ = write!(
             out,
-            "<h3 class=\"sub\"><span class=\"sw s\"></span>= Same — {}</h3>",
-            files(same.len())
+            "<h3 class=\"sub\"><span class=\"sw s\"></span>= {}</h3>",
+            trf("Same — {}", &[&files(same.len())])
         );
         let mut by_dir: HashMap<&str, Vec<&ReportItem>> = HashMap::new();
         for &item in &same {
@@ -1152,27 +1219,87 @@ fn files_section<'a>(out: &mut String, page: &mut Page<'a>, detail: &[&'a Report
 
 fn legend(out: &mut String, options: &ReportOptions) {
     let names = &options.names;
-    let _ = write!(
-        out,
-        "<h2>Legend</h2><dl class=\"gl\">\
-<dt>A / B</dt><dd>A = {}, B = {} (the names given when the report was made)</dd>\
-<dt><span class=\"sw d\"></span> ≠ Different</dt><dd>The file is on both sides, but its contents do not match by the criterion used</dd>\
-<dt><span class=\"sw a\"></span> ◀ Only in A · <span class=\"sw b\"></span> ▶ Only in B</dt><dd>The file is on one side only; the other side does not have it (it may have been deleted, moved or added)</dd>\
-<dt><span class=\"sw s\"></span> = Same</dt><dd>The contents match, including files that differ only in EOL (CRLF or LF), a BOM or parts set to be unimportant</dd>\
-<dt>Changed / Only in A / Only in B (lines)</dt><dd>Changed = lines at the same place with different text; Only in A = lines B does not have; Only in B = lines A does not have · a place is a group of differing lines next to each other</dd>\
-<dt>Colours in the line table</dt><dd>Yellow = changed (the differing characters are darker), red = only in A, green = only in B, purple = differs only in unimportant parts, stripes = this side has no such line · ⍽ / LRM = invisible characters</dd>",
-        esc(&names[0]),
-        esc(&names[1])
+    let _ = write!(out, "<h2>{}</h2><dl class=\"gl\">", tr("Legend"));
+    let mut row = |term: String, text: String| {
+        let _ = write!(out, "<dt>{term}</dt><dd>{text}</dd>");
+    };
+    row(
+        "A / B".to_owned(),
+        trf(
+            "A = {}, B = {} (the names given when the report was made)",
+            &[&esc(&names[0]), &esc(&names[1])],
+        ),
+    );
+    row(
+        format!("<span class=\"sw d\"></span> ≠ {}", tr("Different")),
+        tr("The file is on both sides, but its contents do not match by the criterion used")
+            .to_owned(),
+    );
+    row(
+        format!(
+            "<span class=\"sw a\"></span> ◀ {} · <span class=\"sw b\"></span> ▶ {}",
+            tr("Only in A"),
+            tr("Only in B")
+        ),
+        tr("The file is on one side only; the other side does not have it (it may have been deleted, moved or added)")
+            .to_owned(),
+    );
+    row(
+        format!("<span class=\"sw s\"></span> = {}", tr("Same")),
+        tr("The contents match, including files that differ only in EOL (CRLF or LF), a BOM or parts set to be unimportant")
+            .to_owned(),
+    );
+    row(
+        tr("Changed / Only in A / Only in B (lines)").to_owned(),
+        tr("Changed = lines at the same place with different text; Only in A = lines B does not have; Only in B = lines A does not have · a place is a group of differing lines next to each other")
+            .to_owned(),
+    );
+    row(
+        tr("Colours in the line table").to_owned(),
+        tr("Yellow = changed (the differing characters are darker), red = only in A, green = only in B, purple = differs only in unimportant parts, stripes = this side has no such line · ⍽ / LRM = invisible characters")
+            .to_owned(),
     );
     if options.mask {
-        out.push_str(
-            "<dt>•••••• (hidden #xxxx)</dt><dd>A value that looks like a password or key is hidden; the four characters are its fingerprint: different fingerprints mean different values</dd>\
-<dt>Private keys</dt><dd>Each line of a -----BEGIN … PRIVATE KEY----- block is hidden with its own fingerprint; the BEGIN and END lines stay</dd>\
-<dt>Multi-line values</dt><dd>Each line of a YAML block value under a password or key name (password: |) is hidden the same way</dd>\
-<dt>Not hidden</dt><dd>Other secrets that span lines are not detected</dd>",
+        row(
+            tr("•••••• (hidden #xxxx)").to_owned(),
+            tr("A value that looks like a password or key is hidden; the four characters are its fingerprint: different fingerprints mean different values")
+                .to_owned(),
+        );
+        row(
+            tr("Private keys").to_owned(),
+            tr("Each line of a -----BEGIN … PRIVATE KEY----- block is hidden with its own fingerprint; the BEGIN and END lines stay")
+                .to_owned(),
+        );
+        row(
+            tr("Multi-line values").to_owned(),
+            tr("Each line of a YAML block value under a password or key name (password: |) is hidden the same way")
+                .to_owned(),
+        );
+        row(
+            tr("Not hidden").to_owned(),
+            tr("Other secrets that span lines are not detected").to_owned(),
         );
     }
-    out.push_str(
-        "<dt>Modified later</dt><dd>The file on that side was modified later than the other (the time does not say which side is right)</dd></dl>",
+    row(
+        tr("Modified later").to_owned(),
+        tr("The file on that side was modified later than the other (the time does not say which side is right)")
+            .to_owned(),
     );
+    out.push_str("</dl>");
+}
+
+/// The script of the page. In English it is `JS` as it stands; in Thai the count line says its
+/// words in Thai, with Arabic digits (`"en-US"`) and no plural.
+fn js(lang: Lang) -> Cow<'static, str> {
+    match lang {
+        Lang::En => Cow::Borrowed(JS),
+        Lang::Th => Cow::Owned(JS.replace(
+            EN_COUNT,
+            &format!(
+                "cnt.textContent=\"{} \"+n.toLocaleString(\"en-US\")+\" {}\";",
+                tr("Showing"),
+                tr("files")
+            ),
+        )),
+    }
 }

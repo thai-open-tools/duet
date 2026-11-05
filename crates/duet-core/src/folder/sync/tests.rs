@@ -975,3 +975,110 @@ fn skip_reasons_read_as_the_brief_says() {
     assert_eq!(SkipReason::Link.text(), "links are never copied");
     assert_eq!(SyncMode::ALL.len(), 5);
 }
+
+fn moved_options() -> FolderOptions {
+    FolderOptions {
+        mode: CompareMode::Content,
+        find_moves: true,
+        ..FolderOptions::default()
+    }
+}
+
+fn moved_pair(left: &str, right: &str) -> (TempDir, TempDir, FolderComparison) {
+    let (l, r) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    put_at(l.path(), left, "moved body", T0);
+    put_at(r.path(), right, "moved body", T0);
+    let cmp = compare_with(l.path(), r.path(), &moved_options());
+    (l, r, cmp)
+}
+
+#[test]
+fn a_mirror_that_copies_one_file_and_trashes_its_twin_records_a_move() {
+    let (l, r, cmp) = moved_pair("new/a.txt", "old/a.txt");
+    assert_eq!(cmp.moved_files(), 1);
+    let plan = plan_all(&cmp, SyncMode::MirrorRight, l.path(), r.path());
+    assert_eq!(
+        plan.moves.get("new/a.txt").map(String::as_str),
+        Some("old/a.txt")
+    );
+    assert_eq!(
+        plan.moves.get("old/a.txt").map(String::as_str),
+        Some("new/a.txt")
+    );
+    let back = plan_all(&cmp, SyncMode::MirrorLeft, l.path(), r.path());
+    assert_eq!(back.moves.len(), 2);
+}
+
+#[test]
+fn a_twin_inside_a_trashed_folder_still_counts() {
+    let (l, r, cmp) = moved_pair("new/a.txt", "old/a.txt");
+    let plan = plan_all(&cmp, SyncMode::MirrorRight, l.path(), r.path());
+    assert!(
+        plan.trash.iter().any(|p| p.ends_with("old")),
+        "{:?}",
+        plan.trash
+    );
+    assert_eq!(plan.moves.len(), 2);
+}
+
+#[test]
+fn a_scope_with_only_one_half_of_the_pair_records_no_move() {
+    // The copy without the trash, and the trash without the copy: neither is a move.
+    let (l, r, cmp) = moved_pair("new/a.txt", "old/a.txt");
+    let (new, old) = (index(&cmp, "new"), index(&cmp, "old"));
+    let both = sync_plan(
+        &cmp,
+        &[new, old],
+        &|_| true,
+        SyncMode::MirrorRight,
+        l.path(),
+        r.path(),
+    );
+    assert_eq!(both.moves.len(), 2, "the control: both halves in scope");
+    for half in [new, old] {
+        let plan = sync_plan(
+            &cmp,
+            &[half],
+            &|_| true,
+            SyncMode::MirrorRight,
+            l.path(),
+            r.path(),
+        );
+        assert!(
+            !plan.to_right.files.is_empty() || !plan.trash.is_empty(),
+            "the half still plans something"
+        );
+        assert!(plan.moves.is_empty(), "{:?}", plan.moves);
+    }
+}
+
+#[test]
+fn update_mode_records_no_moves() {
+    let (l, r, cmp) = moved_pair("a.txt", "b.txt");
+    for mode in [
+        SyncMode::UpdateRight,
+        SyncMode::UpdateLeft,
+        SyncMode::UpdateBoth,
+    ] {
+        assert!(plan_all(&cmp, mode, l.path(), r.path()).moves.is_empty());
+    }
+}
+
+#[test]
+fn moves_do_not_change_the_plan() {
+    let (l, r, cmp) = moved_pair("new/a.txt", "old/a.txt");
+    let mut plain = cmp.clone();
+    plain.moved.clear();
+    for mode in SyncMode::ALL {
+        let with = plan_all(&cmp, mode, l.path(), r.path());
+        let without = plan_all(&plain, mode, l.path(), r.path());
+        assert_eq!(with.to_right, without.to_right);
+        assert_eq!(with.to_left, without.to_left);
+        assert_eq!(with.trash, without.trash);
+        assert_eq!(with.skips, without.skips);
+        assert_eq!(with.seen, without.seen);
+        assert_eq!(with.inside, without.inside);
+        assert_eq!(with.changed, without.changed);
+        assert!(without.moves.is_empty());
+    }
+}

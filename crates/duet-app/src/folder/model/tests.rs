@@ -458,7 +458,15 @@ fn filters_have_keys() {
     let keys: Vec<_> = FolderFilter::ALL.iter().map(|f| f.key()).collect();
     assert_eq!(
         keys,
-        ["all", "mismatch", "different", "left", "right", "same"]
+        [
+            "all",
+            "mismatch",
+            "different",
+            "left",
+            "right",
+            "same",
+            "moved"
+        ]
     );
 }
 
@@ -840,4 +848,135 @@ fn the_arrow_keys_leave_the_flat_rows_alone() {
         ["a", "a/same.txt", "a/x.txt", "b", "new.txt", "top.txt"],
         "the folders are as they were before the flat list"
     );
+}
+
+/// a/x1.txt and b/x2.txt on the left, c/y1.txt and d/y2.txt on the right (two moved pairs),
+/// and solo.txt on the left, moved nowhere.
+fn moved_model() -> FolderModel {
+    let file = |rel, len| entry(rel, EntryKind::File, len);
+    let dir = |rel| entry(rel, EntryKind::Dir, 0);
+    let left = vec![
+        dir("a"),
+        file("a/x1.txt", 3),
+        dir("b"),
+        file("b/x2.txt", 4),
+        file("solo.txt", 5),
+    ];
+    let right = vec![dir("c"), file("c/y1.txt", 3), dir("d"), file("d/y2.txt", 4)];
+    let mut cmp = build_tree(left, right, true);
+    let at = |cmp: &FolderComparison, rel: &str| {
+        cmp.nodes.iter().position(|n| n.rel == rel).unwrap() as u32
+    };
+    for (l, r) in [("a/x1.txt", "c/y1.txt"), ("b/x2.txt", "d/y2.txt")] {
+        let (l, r) = (at(&cmp, l), at(&cmp, r));
+        cmp.moved.insert(l, r);
+        cmp.moved.insert(r, l);
+    }
+    FolderModel::new(cmp)
+}
+
+#[test]
+fn moved_rows_pass_the_moved_filter_and_so_do_their_folders() {
+    let mut model = moved_model();
+    model.set_filter(FolderFilter::Moved);
+    model.expand_all();
+    assert_eq!(
+        rels(&model),
+        [
+            "a", "a/x1.txt", "b", "b/x2.txt", "c", "c/y1.txt", "d", "d/y2.txt"
+        ]
+    );
+}
+
+#[test]
+fn the_moved_count_is_pairs() {
+    let c = moved_model().counts();
+    assert_eq!((c.moved, c.all, c.left_only, c.right_only), (2, 5, 3, 2));
+    assert_eq!(FolderFilter::Moved.count(&c), 2);
+}
+
+#[test]
+fn pending_rows_show_under_the_moved_filter() {
+    assert_ne!(FolderFilter::Moved.mask() & PENDING, 0);
+    assert_eq!(FolderFilter::Moved.mask() & (LEFT | RIGHT | SAME), 0);
+}
+
+#[test]
+fn the_key_round_trips_and_mirrors_to_itself() {
+    assert_eq!(FolderFilter::from_key("moved"), Some(FolderFilter::Moved));
+    assert_eq!(FolderFilter::Moved.mirrored(), FolderFilter::Moved);
+    assert_eq!(FolderFilter::ALL.len(), 7);
+    assert_eq!(FolderFilter::Moved.chip_id(), "folder-chip-moved");
+    assert_eq!(FolderFilter::Moved.chip_label(), "Moved");
+}
+
+#[test]
+fn jump_opens_collapsed_folders_and_selects_the_partner() {
+    let mut model = moved_model();
+    model.set_filter(FolderFilter::All);
+    model.collapse_all();
+    assert!(!rels(&model).contains(&"c/y1.txt"));
+    let from = index_of(&model, "a/x1.txt");
+    let Some(Reveal::Shown(row)) = model.jump_to_partner(from) else {
+        panic!("not shown");
+    };
+    assert_eq!(model.node_at(row).rel, "c/y1.txt");
+    assert_eq!(model.selected_node().unwrap().rel, "c/y1.txt");
+    assert!(model.is_expanded(index_of(&model, "c")));
+}
+
+#[test]
+fn jump_switches_to_moved_when_the_chip_hides_the_target() {
+    let mut model = moved_model();
+    model.set_filter(FolderFilter::LeftOnly);
+    model.expand_all();
+    let from = index_of(&model, "a/x1.txt");
+    let Some(Reveal::ChipChanged(row)) = model.jump_to_partner(from) else {
+        panic!("chip not changed");
+    };
+    assert_eq!(model.filter(), FolderFilter::Moved);
+    assert_eq!(model.node_at(row).rel, "c/y1.txt");
+}
+
+#[test]
+fn jump_leaves_everything_when_the_path_filter_hides_the_target() {
+    let mut model = moved_model();
+    model.set_filter(FolderFilter::All);
+    model.set_name_filter("x1");
+    model.select_row(1);
+    let (selected, filter) = (model.selected_node().unwrap().rel.clone(), model.filter());
+    let from = index_of(&model, "a/x1.txt");
+    assert_eq!(
+        model.jump_to_partner(from),
+        Some(Reveal::HiddenByPathFilter)
+    );
+    assert_eq!(model.selected_node().unwrap().rel, selected);
+    assert_eq!(model.filter(), filter);
+}
+
+#[test]
+fn jump_in_the_flat_list_selects_the_row_without_opening_anything() {
+    let mut model = moved_model();
+    model.set_layout(Layout::Flat);
+    model.set_filter(FolderFilter::All);
+    let from = index_of(&model, "b/x2.txt");
+    let Some(Reveal::Shown(row)) = model.jump_to_partner(from) else {
+        panic!("not shown");
+    };
+    assert_eq!(model.node_at(row).rel, "d/y2.txt");
+    assert!(!model.is_expanded(index_of(&model, "d")));
+    assert_eq!(model.jump_to_partner(index_of(&model, "solo.txt")), None);
+}
+
+#[test]
+fn carry_over_keeps_the_moved_filter_and_the_selection() {
+    let mut old = moved_model();
+    old.set_filter(FolderFilter::Moved);
+    old.expand_all();
+    let from = index_of(&old, "a/x1.txt");
+    old.jump_to_partner(from);
+    let mut fresh = moved_model();
+    fresh.carry_over(&old);
+    assert_eq!(fresh.filter(), FolderFilter::Moved);
+    assert_eq!(fresh.selected_node().unwrap().rel, "c/y1.txt");
 }

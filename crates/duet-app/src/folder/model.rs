@@ -10,6 +10,7 @@ use duet_core::folder::entry::EntryKind;
 use duet_core::folder::tree::{FolderComparison, Node, Status};
 
 use crate::folder::prefs::Layout;
+use crate::i18n::tr_key;
 use crate::status::Tone;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -21,6 +22,7 @@ pub enum FolderFilter {
     LeftOnly,
     RightOnly,
     Same,
+    Moved,
 }
 
 const SAME: u8 = 1;
@@ -30,6 +32,8 @@ const RIGHT: u8 = 8;
 const ERROR: u8 = 16;
 const PENDING: u8 = 32;
 const SIMILAR: u8 = 64;
+/// A file that has a moved or renamed twin; set on leaves only.
+const MOVED: u8 = 128;
 /// `row_of` for a node that is not a row.
 const NO_ROW: u32 = u32::MAX;
 
@@ -46,13 +50,14 @@ fn flag(status: &Status) -> u8 {
 }
 
 impl FolderFilter {
-    pub const ALL: [FolderFilter; 6] = [
+    pub const ALL: [FolderFilter; 7] = [
         FolderFilter::All,
         FolderFilter::Mismatch,
         FolderFilter::Different,
         FolderFilter::LeftOnly,
         FolderFilter::RightOnly,
         FolderFilter::Same,
+        FolderFilter::Moved,
     ];
 
     /// Statuses a row's subtree must contain to stay visible. Pending rows (still being
@@ -65,6 +70,7 @@ impl FolderFilter {
             FolderFilter::LeftOnly => LEFT | PENDING,
             FolderFilter::RightOnly => RIGHT | PENDING,
             FolderFilter::Same => SAME | SIMILAR,
+            FolderFilter::Moved => MOVED | PENDING,
         }
     }
 
@@ -77,6 +83,7 @@ impl FolderFilter {
             FolderFilter::LeftOnly => "left",
             FolderFilter::RightOnly => "right",
             FolderFilter::Same => "same",
+            FolderFilter::Moved => "moved",
         }
     }
 
@@ -95,24 +102,26 @@ impl FolderFilter {
 
     pub fn label(self) -> &'static str {
         match self {
-            FolderFilter::All => "All",
-            FolderFilter::Mismatch => "Mismatches",
-            FolderFilter::Different => "Different",
-            FolderFilter::LeftOnly => "Left only",
-            FolderFilter::RightOnly => "Right only",
-            FolderFilter::Same => "Same",
+            FolderFilter::All => tr_key("All"),
+            FolderFilter::Mismatch => tr_key("Mismatches"),
+            FolderFilter::Different => tr_key("Different"),
+            FolderFilter::LeftOnly => tr_key("Left only"),
+            FolderFilter::RightOnly => tr_key("Right only"),
+            FolderFilter::Same => tr_key("Same"),
+            FolderFilter::Moved => tr_key("Moved"),
         }
     }
 
     /// LocalDiff's chip words; `label` keeps the status line's.
     pub fn chip_label(self) -> &'static str {
         match self {
-            FolderFilter::All => "All",
-            FolderFilter::Mismatch => "Mismatched",
-            FolderFilter::Different => "Changed",
-            FolderFilter::LeftOnly => "Left only",
-            FolderFilter::RightOnly => "Right only",
-            FolderFilter::Same => "Same",
+            FolderFilter::All => tr_key("All"),
+            FolderFilter::Mismatch => tr_key("Mismatched"),
+            FolderFilter::Different => tr_key("Changed"),
+            FolderFilter::LeftOnly => tr_key("Left only"),
+            FolderFilter::RightOnly => tr_key("Right only"),
+            FolderFilter::Same => tr_key("Same"),
+            FolderFilter::Moved => tr_key("Moved"),
         }
     }
 
@@ -124,6 +133,7 @@ impl FolderFilter {
             FolderFilter::LeftOnly => "folder-chip-left-only",
             FolderFilter::RightOnly => "folder-chip-right-only",
             FolderFilter::Same => "folder-chip-same",
+            FolderFilter::Moved => "folder-chip-moved",
         }
     }
 
@@ -134,6 +144,7 @@ impl FolderFilter {
             FolderFilter::Different => Tone::Changed,
             FolderFilter::LeftOnly => Tone::LeftOnly,
             FolderFilter::RightOnly => Tone::RightOnly,
+            FolderFilter::Moved => Tone::Moved,
         }
     }
 
@@ -148,8 +159,20 @@ impl FolderFilter {
             FolderFilter::LeftOnly => counts.left_only,
             FolderFilter::RightOnly => counts.right_only,
             FolderFilter::Same => counts.same + counts.similar,
+            FolderFilter::Moved => counts.moved,
         }
     }
+}
+
+/// What a jump to a moved file's twin did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reveal {
+    /// Selected, at this row.
+    Shown(usize),
+    /// Selected at this row after the filter changed to Moved, because the chips hid it.
+    ChipChanged(usize),
+    /// The path filter hides it; nothing changed.
+    HiddenByPathFilter,
 }
 
 /// The column the flat list is sorted by.
@@ -202,6 +225,8 @@ pub struct Counts {
     pub odd_space: usize,
     /// File pairs whose names differ in case.
     pub case_names: usize,
+    /// Moved or renamed files, as pairs (each pair is two rows).
+    pub moved: usize,
 }
 
 #[derive(Clone)]
@@ -257,6 +282,9 @@ impl FolderModel {
         for i in (0..n).rev() {
             if leaf[i] {
                 subtree[i] |= flag(&cmp.nodes[i].status);
+                if cmp.moved.contains_key(&(i as u32)) {
+                    subtree[i] |= MOVED;
+                }
             }
             if let Some(parent) = cmp.nodes[i].parent {
                 let flags = subtree[i];
@@ -868,6 +896,37 @@ impl FolderModel {
         }
     }
 
+    /// The twin of a moved or renamed file, on the other side.
+    pub fn moved_partner(&self, node: u32) -> Option<u32> {
+        self.cmp.moved_partner(node)
+    }
+
+    /// Selects the twin of `node`. A collapsed folder above it opens; when the chips hide it
+    /// the filter becomes Moved (this model only, nothing is saved); when the path filter hides
+    /// it nothing changes. None when `node` has no twin.
+    pub fn jump_to_partner(&mut self, node: u32) -> Option<Reveal> {
+        let partner = self.cmp.moved_partner(node)?;
+        let target = partner as usize;
+        if self.name_filter.is_some() && !self.name_hit[target] {
+            return Some(Reveal::HiddenByPathFilter);
+        }
+        if self.layout != Layout::Flat {
+            self.reveal(target);
+        }
+        let changed = self.subtree[target] & self.filter.mask() == 0;
+        if changed {
+            self.filter = FolderFilter::Moved;
+        }
+        self.set_single(Some(partner));
+        self.rebuild();
+        let row = self.selected_row()?;
+        Some(if changed {
+            Reveal::ChipChanged(row)
+        } else {
+            Reveal::Shown(row)
+        })
+    }
+
     fn jump(&mut self, candidates: impl Iterator<Item = usize>) -> Option<usize> {
         let mask = self.filter.mask();
         let filtering = self.name_filter.is_some();
@@ -958,7 +1017,10 @@ impl FolderModel {
     }
 
     fn count(cmp: &FolderComparison, leaf: &[bool]) -> Counts {
-        let mut counts = Counts::default();
+        let mut counts = Counts {
+            moved: cmp.moved_files(),
+            ..Counts::default()
+        };
         for (i, node) in cmp.nodes.iter().enumerate().filter(|(i, _)| leaf[*i]) {
             counts.all += 1;
             if node.case_differs() {

@@ -4,8 +4,10 @@ use super::*;
 use gpui_kit::FontWeight;
 
 use crate::format::count_of;
+use crate::i18n::{tr, trf};
 use crate::text::prefs::{SaveEncoding, SaveEol, TAB_WIDTHS};
-use crate::text::report::report_menu;
+use crate::text::report::{report_language_menu, report_menu};
+use crate::ui::edit_menu::ld_input;
 use crate::ui::fonts::{Fonts, SMALL_SIZE};
 use crate::ui::icons;
 use crate::ui::style::{
@@ -25,28 +27,40 @@ pub fn position_text(model: Option<&TextModel>) -> String {
 
 /// The whitespace menu's items, one per mode (R2).
 const WHITESPACE_ITEMS: [(WhitespaceMode, &str); 6] = [
-    (WhitespaceMode::None, "Compare whitespace"),
-    (WhitespaceMode::Trailing, "Ignore trailing whitespace"),
-    (WhitespaceMode::Leading, "Ignore leading whitespace"),
-    (WhitespaceMode::Edges, "Ignore whitespace at line edges"),
-    (WhitespaceMode::Amount, "Ignore the amount of whitespace"),
-    (WhitespaceMode::All, "Ignore all whitespace"),
+    (WhitespaceMode::None, tr_key("Compare whitespace")),
+    (
+        WhitespaceMode::Trailing,
+        tr_key("Ignore trailing whitespace"),
+    ),
+    (WhitespaceMode::Leading, tr_key("Ignore leading whitespace")),
+    (
+        WhitespaceMode::Edges,
+        tr_key("Ignore whitespace at line edges"),
+    ),
+    (
+        WhitespaceMode::Amount,
+        tr_key("Ignore the amount of whitespace"),
+    ),
+    (WhitespaceMode::All, tr_key("Ignore all whitespace")),
 ];
 
 /// The "On save" menu's line-ending items (R13).
 const SAVE_EOLS: [(SaveEol, &str); 3] = [
-    (SaveEol::Keep, "Line endings: keep"),
-    (SaveEol::CrLf, "Line endings: CRLF"),
-    (SaveEol::Lf, "Line endings: LF"),
+    (SaveEol::Keep, tr_key("Line endings: keep")),
+    (SaveEol::CrLf, tr_key("Line endings: CRLF")),
+    (SaveEol::Lf, tr_key("Line endings: LF")),
 ];
 
 /// The "On save" menu's encoding items (R13).
 const SAVE_ENCODINGS: [(SaveEncoding, &str); 5] = [
-    (SaveEncoding::Keep, "Encoding: keep"),
-    (SaveEncoding::Utf8, "Encoding: UTF-8"),
-    (SaveEncoding::Utf8Bom, "Encoding: UTF-8 with BOM"),
-    (SaveEncoding::Windows874, "Encoding: Thai (windows-874)"),
-    (SaveEncoding::Utf16Le, "Encoding: UTF-16LE"),
+    (SaveEncoding::Keep, tr_key("Encoding: keep")),
+    (SaveEncoding::Utf8, tr_key("Encoding: UTF-8")),
+    (SaveEncoding::Utf8Bom, tr_key("Encoding: UTF-8 with BOM")),
+    (
+        SaveEncoding::Windows874,
+        tr_key("Encoding: Thai (windows-874)"),
+    ),
+    (SaveEncoding::Utf16Le, tr_key("Encoding: UTF-16LE")),
 ];
 
 /// A font size as the dropdown prints it: "12.5" as is, the others as integers.
@@ -67,32 +81,35 @@ impl TextView {
     ) -> impl IntoElement {
         let model = self.model.as_ref();
         let blocks = model.is_some_and(|m| m.block_count() > 0);
-        // Copying all needs a target that can be edited: not the formatted view.
-        let can_take = |left: bool| model.is_some_and(|m| m.editable(left).is_ok());
+        // Copying all needs a target that can be edited, and a source that shows its own text:
+        // not the formatted or the sorted view.
+        let can_take = |left: bool| model.is_some_and(|m| m.can_copy_to(left));
         h_flex()
             .id("text-toolbar")
             .test_support()
             .flex_none()
             .flex_wrap()
             .items_center()
-            .gap(px(5.))
+            // 4 px between controls, not 5: Sort keys came 33 px short of one row at 1400 px with
+            // the test fonts (Plan D).
+            .gap(px(4.))
             .px(px(10.))
             .py(px(5.))
             .bg(p.panel)
             .border_b_1()
             .border_color(p.line)
             .children(self.has_origin.then(|| {
-                ld_icon_label_button("text-back", icons::BACK, "Back", p)
-                    .ld_tooltip("Back to the folder compare (Esc)")
+                ld_icon_label_button("text-back", icons::BACK, tr("Back"), p)
+                    .ld_tooltip(tr("Back to the folder compare (Esc)"))
                     .ld_click(true, cx.listener(|_, _, _, cx| cx.emit(TextEvent::Back)))
             }))
             .children(self.has_origin.then(|| ld_separator(p)))
             .child(
-                ld_icon_button("text-swap", icons::SWAP, "Swap sides (F9)", p)
+                ld_icon_button("text-swap", icons::SWAP, tr("Swap sides (F9)"), p)
                     .ld_click(true, cx.listener(|this, _, _, cx| this.swap_sides(cx))),
             )
             .child(
-                ld_icon_button("text-reload", icons::RELOAD, "Reload (F5)", p).ld_click(
+                ld_icon_button("text-reload", icons::RELOAD, tr("Reload (F5)"), p).ld_click(
                     true,
                     cx.listener(|this, _, window, cx| this.on_reload(&Reload, window, cx)),
                 ),
@@ -102,7 +119,7 @@ impl TextView {
                 ld_icon_button(
                     "text-first",
                     icons::FIRST,
-                    "First difference (Ctrl+Home)",
+                    tr("First difference (Ctrl+Home)"),
                     p,
                 )
                 .ld_click(
@@ -111,10 +128,13 @@ impl TextView {
                 ),
             )
             .child(
-                ld_icon_button("text-prev", icons::PREV, "Previous difference (F7)", p).ld_click(
-                    blocks,
-                    cx.listener(|this, _, window, cx| this.prev_change(&PrevChange, window, cx)),
-                ),
+                ld_icon_button("text-prev", icons::PREV, tr("Previous difference (F7)"), p)
+                    .ld_click(
+                        blocks,
+                        cx.listener(|this, _, window, cx| {
+                            this.prev_change(&PrevChange, window, cx)
+                        }),
+                    ),
             )
             .child(
                 div()
@@ -138,21 +158,27 @@ impl TextView {
                     .child(position_text(model)),
             )
             .child(
-                ld_icon_button("text-next", icons::NEXT, "Next difference (F8)", p).ld_click(
+                ld_icon_button("text-next", icons::NEXT, tr("Next difference (F8)"), p).ld_click(
                     blocks,
                     cx.listener(|this, _, window, cx| this.next_change(&NextChange, window, cx)),
                 ),
             )
             .child(
-                ld_icon_button("text-last", icons::LAST, "Last difference (Ctrl+End)", p).ld_click(
+                ld_icon_button(
+                    "text-last",
+                    icons::LAST,
+                    tr("Last difference (Ctrl+End)"),
+                    p,
+                )
+                .ld_click(
                     blocks,
                     cx.listener(|this, _, window, cx| this.last_change(&LastChange, window, cx)),
                 ),
             )
             .child(ld_separator(p))
             .child(
-                ld_label_icon_button("text-copy-all-right", "All", icons::TO_RIGHT, p)
-                    .ld_tooltip("Copy all to the right")
+                ld_label_icon_button("text-copy-all-right", tr("All"), icons::TO_RIGHT, p)
+                    .ld_tooltip(tr("Copy all to the right"))
                     .ld_click(
                         can_take(false),
                         cx.listener(|this, _, _, cx| {
@@ -161,8 +187,8 @@ impl TextView {
                     ),
             )
             .child(
-                ld_icon_label_button("text-copy-all-left", icons::TO_LEFT, "All", p)
-                    .ld_tooltip("Copy all to the left")
+                ld_icon_label_button("text-copy-all-left", icons::TO_LEFT, tr("All"), p)
+                    .ld_tooltip(tr("Copy all to the left"))
                     .ld_click(
                         can_take(true),
                         cx.listener(|this, _, _, cx| {
@@ -171,22 +197,22 @@ impl TextView {
                     ),
             )
             .child(
-                ld_icon_button("text-undo", icons::UNDO, "Undo (Ctrl+Z)", p).ld_click(
+                ld_icon_button("text-undo", icons::UNDO, tr("Undo (Ctrl+Z)"), p).ld_click(
                     self.undo.can_undo(),
                     cx.listener(|this, _, _, cx| this.undo_edit(cx)),
                 ),
             )
             .child(
-                ld_icon_button("text-redo", icons::REDO, "Redo (Ctrl+Y)", p).ld_click(
+                ld_icon_button("text-redo", icons::REDO, tr("Redo (Ctrl+Y)"), p).ld_click(
                     self.undo.can_redo(),
                     cx.listener(|this, _, _, cx| this.redo_edit(cx)),
                 ),
             )
             .child(ld_separator(p))
             .child(
-                ld_button("text-format", "Format", p)
+                ld_button("text-format", tr("Format"), p)
                     .ld_on(self.request.format, p)
-                    .ld_tooltip("Pretty-print JSON or XML on both sides (read-only)")
+                    .ld_tooltip(tr("Pretty-print JSON or XML on both sides (read-only)"))
                     .ld_click(
                         true,
                         cx.listener(|this, _, window, cx| {
@@ -196,15 +222,29 @@ impl TextView {
                     ),
             )
             .child(
-                ld_button("text-reformat", "Reformat", p)
-                    .ld_tooltip(
+                ld_button("text-sort-keys", tr("Sort keys"), p)
+                    .ld_on(self.request.sort_keys, p)
+                    .ld_tooltip(tr(
+                        "Sort the keys of JSON or YAML on both sides, indented the same (read-only). Line numbers are those of the sorted text.",
+                    ))
+                    .ld_click(
+                        true,
+                        cx.listener(|this, _, window, cx| {
+                            let on = !this.request.sort_keys;
+                            this.set_sort_keys(on, window, cx)
+                        }),
+                    ),
+            )
+            .child(
+                ld_button("text-reformat", tr("Reformat"), p)
+                    .ld_tooltip(tr(
                         "Re-indent JSON or XML, else trim trailing spaces, as an edit you can save",
-                    )
+                    ))
                     .ld_click(true, cx.listener(|this, _, _, cx| this.reformat_sides(cx))),
             )
             .child(
-                ld_button("text-save-left", "Save left", p)
-                    .ld_tooltip("Save the left file")
+                ld_button("text-save-left", tr("Save left"), p)
+                    .ld_tooltip(tr("Save the left file"))
                     .ld_click(
                         self.save_enabled(true),
                         cx.listener(|this, _, window, cx| {
@@ -213,8 +253,8 @@ impl TextView {
                     ),
             )
             .child(
-                ld_button("text-save-right", "Save right", p)
-                    .ld_tooltip("Save the right file")
+                ld_button("text-save-right", tr("Save right"), p)
+                    .ld_tooltip(tr("Save the right file"))
                     .ld_click(
                         self.save_enabled(false),
                         cx.listener(|this, _, window, cx| {
@@ -230,7 +270,7 @@ impl TextView {
             .child(self.font_menu(cx))
             .child(ld_separator(p))
             .child(
-                ld_icon_button("text-find-open", icons::FIND, "Find (Ctrl+F)", p).ld_click(
+                ld_icon_button("text-find-open", icons::FIND, tr("Find (Ctrl+F)"), p).ld_click(
                     true,
                     cx.listener(|this, _, window, cx| this.open_find(&OpenFind, window, cx)),
                 ),
@@ -239,7 +279,7 @@ impl TextView {
                 ld_icon_button(
                     "text-goto-open",
                     icons::GO_TO_LINE,
-                    "Go to line (Ctrl+G)",
+                    tr("Go to line (Ctrl+G)"),
                     p,
                 )
                 .ld_click(
@@ -258,19 +298,19 @@ impl TextView {
         let language = {
             let this = cx.entity().downgrade();
             let (chosen, detected) = (self.language, self.detected_language());
-            let label = chosen.map_or("Auto", Language::label);
-            ld_dropdown("text-language", format!("Type: {label}"), SMALL_SIZE).dropdown_menu(
+            let label = chosen.map_or(tr("Auto"), Language::label);
+            ld_dropdown("text-language", trf("Type: {}", &[&label]), SMALL_SIZE).dropdown_menu(
                 move |menu, _, _| {
                     let item = |label: String, language: Option<Language>| {
                         let this = this.clone();
-                        PopupMenuItem::new(label)
+                        crate::ui::menu::row(label)
                             .checked(chosen == language)
                             .on_click(move |_, _, cx| {
                                 let _ = this.update(cx, |view, cx| view.set_language(language, cx));
                             })
                     };
                     Language::ALL.into_iter().fold(
-                        menu.item(item(format!("Auto ({})", detected.label()), None)),
+                        menu.item(item(trf("Auto ({})", &[&detected.label()]), None)),
                         |menu, language| {
                             menu.item(item(language.label().to_owned(), Some(language)))
                         },
@@ -293,17 +333,17 @@ impl TextView {
         let whitespace = {
             let this = cx.entity().downgrade();
             let label = match options.whitespace {
-                WhitespaceMode::None => "Whitespace: compare",
-                WhitespaceMode::Trailing => "Whitespace: ignore trailing",
-                WhitespaceMode::Leading => "Whitespace: ignore leading",
-                WhitespaceMode::Edges => "Whitespace: ignore at edges",
-                WhitespaceMode::Amount => "Whitespace: ignore amount",
-                WhitespaceMode::All => "Whitespace: ignore all",
+                WhitespaceMode::None => tr("Whitespace: compare"),
+                WhitespaceMode::Trailing => tr("Whitespace: ignore trailing"),
+                WhitespaceMode::Leading => tr("Whitespace: ignore leading"),
+                WhitespaceMode::Edges => tr("Whitespace: ignore at edges"),
+                WhitespaceMode::Amount => tr("Whitespace: ignore amount"),
+                WhitespaceMode::All => tr("Whitespace: ignore all"),
             };
             ld_dropdown("text-ignore-ws", label, SMALL_SIZE).dropdown_menu(move |menu, _, _| {
                 let item = |label: &'static str, mode: WhitespaceMode| {
                     let this = this.clone();
-                    PopupMenuItem::new(label)
+                    crate::ui::menu::row(tr(label))
                         .checked(options.whitespace == mode)
                         .on_click(move |_, _, cx| {
                             let _ = this.update(cx, |view, cx| view.set_whitespace(mode, cx));
@@ -334,29 +374,29 @@ impl TextView {
                 [
                     segment(
                         "text-filter-all",
-                        "All",
-                        "All lines (Ctrl+1)",
+                        tr("All"),
+                        tr("All lines (Ctrl+1)"),
                         TextFilter::All,
                         false,
                     ),
                     segment(
                         "text-filter-diffs",
-                        "Differences",
-                        "Differences only (Ctrl+2)",
+                        tr("Differences"),
+                        tr("Differences only (Ctrl+2)"),
                         TextFilter::Differences,
                         false,
                     ),
                     segment(
                         "text-filter-context",
-                        "Context",
-                        "Differences with context (Ctrl+3)",
+                        tr("Context"),
+                        tr("Differences with context (Ctrl+3)"),
                         TextFilter::Context(self.context_lines()),
                         false,
                     ),
                     segment(
                         "text-filter-same",
-                        "Same",
-                        "Same lines only (Ctrl+4)",
+                        tr("Same"),
+                        tr("Same lines only (Ctrl+4)"),
                         TextFilter::Same,
                         true,
                     ),
@@ -364,16 +404,16 @@ impl TextView {
                 p,
             ))
             .child(ld_separator(p))
-            .child(div().text_color(p.muted).child("Ignore"))
+            .child(div().text_color(p.muted).child(tr("Ignore")))
             .child(whitespace)
             .child(
-                ld_toggle("text-ignore-case", "Case", options.ignore_case, p).ld_click(
+                ld_toggle("text-ignore-case", tr("Case"), options.ignore_case, p).ld_click(
                     true,
                     cx.listener(|this, _, _, cx| this.toggle_ignore(IgnoreChoice::Case, cx)),
                 ),
             )
             .child(
-                ld_toggle("text-ignore-eol", "Line endings", options.ignore_eol, p).ld_click(
+                ld_toggle("text-ignore-eol", tr("Line endings"), options.ignore_eol, p).ld_click(
                     true,
                     cx.listener(|this, _, _, cx| this.toggle_ignore(IgnoreChoice::LineEndings, cx)),
                 ),
@@ -381,7 +421,7 @@ impl TextView {
             .child(
                 ld_toggle(
                     "text-ignore-blank",
-                    "Blank lines",
+                    tr("Blank lines"),
                     self.prefs.ignore_blank,
                     p,
                 )
@@ -396,7 +436,7 @@ impl TextView {
             .child(
                 ld_toggle(
                     "text-ignore-comments",
-                    "Comments",
+                    tr("Comments"),
                     self.prefs.ignore_comments,
                     p,
                 )
@@ -409,9 +449,9 @@ impl TextView {
                 ),
             )
             .child(
-                ld_button("text-rules-open", "Rules…", p)
+                ld_button("text-rules-open", tr("Rules…"), p)
                     .ld_on(self.rules_lit(), p)
-                    .ld_tooltip("Text and line rules, and the context size")
+                    .ld_tooltip(tr("Text and line rules, and the context size"))
                     .ld_click(
                         true,
                         // A second click closes the panel, as Cancel does (X-74).
@@ -426,8 +466,8 @@ impl TextView {
             )
             .child(ld_separator(p))
             .child(
-                ld_toggle("text-moves", "Moves", self.request.detect_moves, p)
-                    .ld_tooltip("Mark lines that moved")
+                ld_toggle("text-moves", tr("Moves"), self.request.detect_moves, p)
+                    .ld_tooltip(tr("Mark lines that moved"))
                     .ld_click(
                         true,
                         cx.listener(|this, _, _, cx| {
@@ -437,7 +477,7 @@ impl TextView {
                     ),
             )
             .child(
-                ld_toggle("text-syntax", "Syntax", self.syntax_on, p)
+                ld_toggle("text-syntax", tr("Syntax"), self.syntax_on, p)
                     .ld_tooltip(self.syntax_tooltip())
                     .ld_click(
                         true,
@@ -448,11 +488,11 @@ impl TextView {
             .child(
                 ld_toggle(
                     "text-show-ws",
-                    "Show spaces",
+                    tr("Show spaces"),
                     self.display.show_whitespace,
                     p,
                 )
-                .ld_tooltip("Show spaces and tabs")
+                .ld_tooltip(tr("Show spaces and tabs"))
                 .ld_click(
                     true,
                     cx.listener(|this, _, window, cx| {
@@ -461,8 +501,8 @@ impl TextView {
                 ),
             )
             .child(
-                ld_toggle("text-wrap", "Wrap", self.wrap, p)
-                    .ld_tooltip("Wrap long lines")
+                ld_toggle("text-wrap", tr("Wrap"), self.wrap, p)
+                    .ld_tooltip(tr("Wrap long lines"))
                     .ld_click(
                         true,
                         cx.listener(|this, _, _, cx| {
@@ -472,8 +512,8 @@ impl TextView {
                     ),
             )
             .child(
-                ld_toggle("text-details", "Details", self.prefs.details, p)
-                    .ld_tooltip("Show the whole line under the rows")
+                ld_toggle("text-details", tr("Details"), self.prefs.details, p)
+                    .ld_tooltip(tr("Show the whole line under the rows"))
                     .ld_click(
                         true,
                         cx.listener(|this, _, _, cx| {
@@ -488,12 +528,19 @@ impl TextView {
     /// "Report", a dropdown: the HTML, patch and text reports and the copied patch (R21).
     fn report_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let (view, focus) = (cx.entity().downgrade(), self.focus.clone());
-        ld_dropdown("text-report", "Report", UI_SIZE)
-            .tooltip("Save the comparison as an HTML page, a patch or a text report")
+        ld_dropdown("text-report", tr("Report"), UI_SIZE)
+            .tooltip(tr(
+                "Save the comparison as an HTML page, a patch or a text report",
+            ))
             .dropdown_menu(move |menu, _, cx| {
                 let entries = view
                     .upgrade()
-                    .map(|view| report_menu(view.read(cx)))
+                    .map(|view| {
+                        let view = view.read(cx);
+                        let mut entries = report_menu(view);
+                        entries.extend(report_language_menu(view));
+                        entries
+                    })
                     .unwrap_or_default();
                 fill_menu(menu, entries, Some(focus.clone()))
             })
@@ -510,28 +557,32 @@ impl TextView {
             changes.push(encoding.label());
         }
         let label = if changes.is_empty() {
-            "On save: keep".to_owned()
+            tr("On save: keep").to_owned()
         } else {
-            format!("On save: {}", changes.join(" · "))
+            trf("On save: {}", &[&changes.join(" · ")])
         };
         let this = cx.entity().downgrade();
         ld_dropdown("text-save-options", label, UI_SIZE)
-            .tooltip("Change the line endings or the encoding of the files you save")
+            .tooltip(tr(
+                "Change the line endings or the encoding of the files you save",
+            ))
             .dropdown_menu(move |menu, _, _| {
                 let menu = SAVE_EOLS.iter().fold(menu, |menu, (choice, text)| {
                     let (this, choice) = (this.clone(), *choice);
-                    menu.item(PopupMenuItem::new(*text).checked(eol == choice).on_click(
-                        move |_, _, cx| {
-                            let _ = this.update(cx, |view, cx| view.set_save_eol(choice, cx));
-                        },
-                    ))
+                    menu.item(
+                        crate::ui::menu::row(tr(text))
+                            .checked(eol == choice)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |view, cx| view.set_save_eol(choice, cx));
+                            }),
+                    )
                 });
                 SAVE_ENCODINGS
                     .iter()
                     .fold(menu.separator(), |menu, (choice, text)| {
                         let (this, choice) = (this.clone(), *choice);
                         menu.item(
-                            PopupMenuItem::new(*text)
+                            crate::ui::menu::row(tr(text))
                                 .checked(encoding == choice)
                                 .on_click(move |_, _, cx| {
                                     let _ = this
@@ -546,13 +597,13 @@ impl TextView {
     fn tab_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let chosen = self.display.tab_width;
         let this = cx.entity().downgrade();
-        ld_dropdown("text-tab", format!("Tab {chosen}"), SMALL_SIZE)
-            .tooltip("Tab width")
+        ld_dropdown("text-tab", trf("Tab {}", &[&chosen]), SMALL_SIZE)
+            .tooltip(tr("Tab width"))
             .dropdown_menu(move |menu, _, _| {
                 TAB_WIDTHS.fold(menu, |menu, width| {
                     let this = this.clone();
                     menu.item(
-                        PopupMenuItem::new(width.to_string())
+                        crate::ui::menu::row(width.to_string())
                             .checked(chosen == usize::from(width))
                             .on_click(move |_, _, cx| {
                                 let _ = this.update(cx, |view, cx| view.set_tab_width(width, cx));
@@ -568,15 +619,15 @@ impl TextView {
         let this = cx.entity().downgrade();
         ld_dropdown(
             "text-font",
-            format!("Font {}", font_size_text(chosen)),
+            trf("Font {}", &[&font_size_text(chosen)]),
             UI_SIZE,
         )
-        .tooltip("Font size")
+        .tooltip(tr("Font size"))
         .dropdown_menu(move |menu, _, _| {
             FONT_SIZES.iter().fold(menu, |menu, &size| {
                 let this = this.clone();
                 menu.item(
-                    PopupMenuItem::new(font_size_text(size))
+                    crate::ui::menu::row(font_size_text(size))
                         .checked(chosen == size)
                         .on_click(move |_, _, cx| {
                             let _ = this.update(cx, |view, cx| view.set_font_size(size, cx));
@@ -615,7 +666,7 @@ impl TextView {
                 format!("{} · {lines}", doc_info(doc))
             },
         );
-        let side = if left { "Left" } else { "Right" };
+        let side = tr(if left { "Left" } else { "Right" });
         let this = cx.entity().downgrade();
         ld_text_dropdown(
             if left {
@@ -628,16 +679,15 @@ impl TextView {
             p.dim,
         )
         .accessibility_label(format!("{side}: {label}"))
-        .tooltip(format!(
-            "{side} encoding: {}",
-            encoding_text(chosen, detected)
+        .tooltip(trf(
+            "{} encoding: {}",
+            &[&side, &encoding_text(chosen, detected)],
         ))
         .dropdown_menu(move |menu, _, _| {
-            ENCODINGS.iter().fold(menu, |menu, (label, encoding)| {
+            encoding_choices().fold(menu, |menu, (label, encoding)| {
                 let this = this.clone();
-                let encoding = *encoding;
                 menu.item(
-                    PopupMenuItem::new(*label)
+                    crate::ui::menu::row(label)
                         .checked(chosen == encoding)
                         .on_click(move |_, window, cx| {
                             let _ = this.update(cx, |view, cx| {
@@ -652,7 +702,7 @@ impl TextView {
     pub(super) fn render_find(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bar = self.find.as_ref()?;
         let scope = |id: &'static str, scope: FindScope, last: bool| {
-            ld_segment(id, scope.label(), bar.query.scope == scope, last, p).ld_click(
+            ld_segment(id, tr(scope.label()), bar.query.scope == scope, last, p).ld_click(
                 true,
                 cx.listener(move |this, _, _, cx| this.set_find_scope(scope, cx)),
             )
@@ -676,10 +726,10 @@ impl TextView {
                         .id("text-find-field")
                         .test_support()
                         .w(px(220.))
-                        .tooltip(|window, cx| ld_tip(FIND_TOOLTIP.into(), window, cx))
+                        .tooltip(|window, cx| ld_tip(tr(FIND_TOOLTIP).into(), window, cx))
                         .child(
-                            Input::new(&bar.input)
-                                .aria_label("Find")
+                            ld_input(&bar.input)
+                                .aria_label(tr("Find"))
                                 .when_some(self.find_field_border(p), |input, color| {
                                     input.border_color(color)
                                 }),
@@ -695,16 +745,16 @@ impl TextView {
                     p,
                 ))
                 .child(
-                    ld_toggle("text-find-case", "Aa", bar.query.match_case, p)
-                        .ld_tooltip("Match case")
+                    ld_toggle("text-find-case", tr("Aa"), bar.query.match_case, p)
+                        .ld_tooltip(tr("Match case"))
                         .ld_click(
                             true,
                             cx.listener(|this, _, _, cx| this.toggle_match_case(cx)),
                         ),
                 )
                 .child(
-                    ld_toggle("text-find-word", "Word", bar.query.whole_word, p)
-                        .ld_tooltip("Whole word")
+                    ld_toggle("text-find-word", tr("Word"), bar.query.whole_word, p)
+                        .ld_tooltip(tr("Whole word"))
                         .ld_click(
                             true,
                             cx.listener(|this, _, _, cx| this.toggle_whole_word(cx)),
@@ -712,14 +762,14 @@ impl TextView {
                 )
                 .child(
                     ld_toggle("text-find-regex", ".*", bar.query.regex, p)
-                        .ld_tooltip("Regular expression")
+                        .ld_tooltip(tr("Regular expression"))
                         .ld_click(true, cx.listener(|this, _, _, cx| this.toggle_regex(cx))),
                 )
                 .child(
                     ld_icon_button(
                         "text-find-prev",
                         icons::PREV,
-                        "Previous match (Shift+F3)",
+                        tr("Previous match (Shift+F3)"),
                         p,
                     )
                     .ld_click(
@@ -728,7 +778,7 @@ impl TextView {
                     ),
                 )
                 .child(
-                    ld_icon_button("text-find-next", icons::NEXT, "Next match (F3)", p)
+                    ld_icon_button("text-find-next", icons::NEXT, tr("Next match (F3)"), p)
                         .ld_click(true, cx.listener(|this, _, _, cx| this.step_find(true, cx))),
                 )
                 .child(
@@ -744,25 +794,27 @@ impl TextView {
                         .id("text-find-replace")
                         .test_support()
                         .w(px(200.))
-                        .child(Input::new(&bar.replace).aria_label("Replace with")),
+                        .child(ld_input(&bar.replace).aria_label(tr("Replace with"))),
                 )
-                .child(ld_button("text-replace-one", "Replace", p).ld_click(
+                .child(ld_button("text-replace-one", tr("Replace"), p).ld_click(
                     true,
                     cx.listener(|this, _, _, cx| {
                         let with = this.find.as_ref().map(|bar| bar.replace_text.clone());
                         this.replace_one(&with.unwrap_or_default(), cx);
                     }),
                 ))
-                .child(ld_button("text-replace-all", "Replace all", p).ld_click(
-                    true,
-                    cx.listener(|this, _, _, cx| {
-                        let with = this.find.as_ref().map(|bar| bar.replace_text.clone());
-                        this.replace_all(&with.unwrap_or_default(), cx);
-                    }),
-                ))
+                .child(
+                    ld_button("text-replace-all", tr("Replace all"), p).ld_click(
+                        true,
+                        cx.listener(|this, _, _, cx| {
+                            let with = this.find.as_ref().map(|bar| bar.replace_text.clone());
+                            this.replace_all(&with.unwrap_or_default(), cx);
+                        }),
+                    ),
+                )
                 .child(div().flex_1())
                 .child(
-                    ld_icon_button("text-find-close", icons::CLOSE, "Close (Esc)", p).ld_click(
+                    ld_icon_button("text-find-close", icons::CLOSE, tr("Close (Esc)"), p).ld_click(
                         true,
                         cx.listener(|this, _, window, cx| this.close_bars(window, cx)),
                     ),
@@ -794,31 +846,31 @@ impl TextView {
                 .border_b_1()
                 .border_color(p.line)
                 .text_size(px(SMALL_SIZE))
-                .child("Go to line")
+                .child(tr("Go to line"))
                 .child(
                     div()
                         .w(px(120.))
-                        .child(Input::new(&bar.input).aria_label("Go to line")),
+                        .child(ld_input(&bar.input).aria_label(tr("Go to line"))),
                 )
                 .child(ld_segmented(
                     "text-goto-side",
                     [
-                        side("text-goto-left", "Left", true),
-                        side("text-goto-right", "Right", false),
+                        side("text-goto-left", tr("Left"), true),
+                        side("text-goto-right", tr("Right"), false),
                     ],
                     p,
                 ))
                 .child(
                     div()
                         .text_color(p.muted)
-                        .child(format!("of {}", format_size(lines as u64))),
+                        .child(trf("of {}", &[&format_size(lines as u64)])),
                 )
                 .children(bar.error.clone().map(|error| {
                     div()
                         .id("text-goto-error")
                         .test_support()
                         .text_color(p.del)
-                        .child(error)
+                        .prose(error)
                 }))
                 .into_any_element(),
         )
@@ -840,18 +892,18 @@ impl TextView {
 /// "Left: rust. Right: over 10 MiB, so plain."
 fn syntax_tooltip(states: [SyntaxState; 2], languages: [Option<&'static str>; 2]) -> String {
     let side = |name: &str, state: SyntaxState, language: Option<&str>| {
-        let language = language.unwrap_or("plain text");
+        let language = language.unwrap_or(tr(PLAIN_TEXT));
         match state {
-            SyntaxState::Ready => format!("{name}: {language}."),
-            SyntaxState::Parsing => format!("{name}: {language}, parsing."),
-            SyntaxState::Off("plain text") => format!("{name}: plain text."),
-            SyntaxState::Off(why) => format!("{name}: {why}, so plain."),
+            SyntaxState::Ready => trf("{}: {}.", &[&name, &language]),
+            SyntaxState::Parsing => trf("{}: {}, parsing.", &[&name, &language]),
+            SyntaxState::Off(PLAIN_TEXT) => trf("{}: plain text.", &[&name]),
+            SyntaxState::Off(why) => trf("{}: {}, so plain.", &[&name, &tr(why)]),
         }
     };
     format!(
         "{} {}",
-        side("Left", states[0], languages[0]),
-        side("Right", states[1], languages[1])
+        side(tr("Left"), states[0], languages[0]),
+        side(tr("Right"), states[1], languages[1])
     )
 }
 

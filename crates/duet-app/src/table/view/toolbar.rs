@@ -7,13 +7,14 @@ use gpui_kit::FontWeight;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Disableable as _;
 use gpui_kit::component::h_flex;
-use gpui_kit::component::input::Input;
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::DropdownMenu as _;
 
 use super::*;
+use crate::i18n::{tr, tr_key, trf};
 use crate::pathbar::path_input;
 use crate::status::Tone;
-use crate::table::menu::export_menu;
+use crate::table::menu::{export_language_menu, export_menu};
+use crate::ui::edit_menu::ld_input;
 use crate::ui::fonts::{CODE_SIZE, Fonts, UI_SIZE};
 use crate::ui::icons;
 use crate::ui::menu::fill as fill_menu;
@@ -23,8 +24,8 @@ use crate::ui::style::{
 };
 
 const KEYS_TOOLTIP: &str =
-    "Column names or 1-based numbers, comma-separated. Empty: rows align by order.";
-pub(super) const KEYS_PLACEHOLDER: &str = "e.g. id or 1,3 (empty = row order)";
+    tr_key("Column names or 1-based numbers, comma-separated. Empty: rows align by order.");
+pub(super) const KEYS_PLACEHOLDER: &str = tr_key("e.g. id or 1,3 (empty = row order)");
 const NUMBERS_TOOLTIP: &str = "1.0 = 1, 1,000 = 1000, 1e3 = 1000";
 
 /// The chip's tone: what colour its count takes.
@@ -55,25 +56,25 @@ impl TableView {
             nav(
                 "table-first",
                 icons::FIRST,
-                "First differing row (Ctrl+Home)",
+                tr("First differing row (Ctrl+Home)"),
                 Jump::First,
             ),
             nav(
                 "table-prev",
                 icons::PREV,
-                "Previous differing row (F7)",
+                tr("Previous differing row (F7)"),
                 Jump::Prev,
             ),
             nav(
                 "table-next",
                 icons::NEXT,
-                "Next differing row (F8)",
+                tr("Next differing row (F8)"),
                 Jump::Next,
             ),
             nav(
                 "table-last",
                 icons::LAST,
-                "Last differing row (Ctrl+End)",
+                tr("Last differing row (Ctrl+End)"),
                 Jump::Last,
             ),
         );
@@ -120,16 +121,16 @@ impl TableView {
             .child(last)
             .child(ld_separator(p))
             .child(
-                ld_icon_button("table-swap", icons::SWAP, "Swap sides (F9)", p)
+                ld_icon_button("table-swap", icons::SWAP, tr("Swap sides (F9)"), p)
                     .ld_click(true, cx.listener(|this, _, _, cx| this.swap_sides(cx))),
             )
             .child(
-                ld_icon_button("table-reload", icons::RELOAD, "Reload (F5)", p)
+                ld_icon_button("table-reload", icons::RELOAD, tr("Reload (F5)"), p)
                     .ld_click(true, cx.listener(|this, _, _, cx| this.reload(cx))),
             )
             .child(
-                ld_button("table-find", "Find…", p)
-                    .ld_tooltip("Find (Ctrl+F)")
+                ld_button("table-find", tr("Find…"), p)
+                    .ld_tooltip(tr("Find (Ctrl+F)"))
                     .ld_click(
                         self.diff.is_some(),
                         cx.listener(|this, _, window, cx| this.open_find(window, cx)),
@@ -141,13 +142,18 @@ impl TableView {
     /// "Export", a dropdown with the differences as CSV and the HTML report.
     fn export_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let (view, focus) = (cx.entity().downgrade(), self.focus.clone());
-        ld_dropdown("table-export", "Export", UI_SIZE)
-            .tooltip("Export the differences")
+        ld_dropdown("table-export", tr("Export"), UI_SIZE)
+            .tooltip(tr("Export the differences"))
             .disabled(!self.can_export())
             .dropdown_menu(move |menu, _, cx| {
                 let entries = view
                     .upgrade()
-                    .map(|view| export_menu(view.read(cx)))
+                    .map(|view| {
+                        let view = view.read(cx);
+                        let mut entries = export_menu(view);
+                        entries.extend(export_language_menu(view));
+                        entries
+                    })
                     .unwrap_or_default();
                 fill_menu(menu, entries, Some(focus.clone()))
             })
@@ -160,25 +166,23 @@ impl TableView {
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let (side, open_id, paste_id, name_id) = if left {
-            (
-                "left",
-                "table-open-left",
-                "table-paste-left",
-                "table-left-name",
-            )
+        let (open_id, paste_id, name_id) = if left {
+            ("table-open-left", "table-paste-left", "table-left-name")
         } else {
-            (
-                "right",
-                "table-open-right",
-                "table-paste-right",
-                "table-right-name",
-            )
+            ("table-open-right", "table-paste-right", "table-right-name")
         };
-        let open_tip = if left {
-            "Open the left file (Ctrl+O)"
+        let (open_label, open_tip, paste_tip) = if left {
+            (
+                tr("Open left…"),
+                tr("Open the left file (Ctrl+O)"),
+                tr("Paste the clipboard as the left table"),
+            )
         } else {
-            "Open the right file (Ctrl+Shift+O)"
+            (
+                tr("Open right…"),
+                tr("Open the right file (Ctrl+Shift+O)"),
+                tr("Paste the clipboard as the right table"),
+            )
         };
         let info = self.side(left);
         if let Some(edit) = self.path_edit.as_ref().filter(|e| e.left() == left) {
@@ -205,7 +209,7 @@ impl TableView {
             .truncate()
             .aria_label(self.name_text(left))
             .text_color(if info.is_some() { p.text } else { p.muted })
-            .child(info.map_or("No file chosen".to_owned(), |info| info.name.clone()))
+            .child(info.map_or_else(|| self.unread_name(left), |info| info.name.clone()))
             .children(info.map(|info| {
                 div()
                     .ml(px(8.))
@@ -222,7 +226,7 @@ impl TableView {
             .gap(px(5.))
             .items_center()
             .child(
-                ld_button(open_id, format!("Open {side}…"), p)
+                ld_button(open_id, open_label, p)
                     .ld_tooltip(open_tip)
                     .ld_click(
                         true,
@@ -230,18 +234,13 @@ impl TableView {
                     ),
             )
             .child(
-                ld_icon_button(
-                    paste_id,
-                    icons::PASTE_TABLE,
-                    format!("Paste the clipboard as the {side} table"),
-                    p,
-                )
-                .ld_click(
+                ld_icon_button(paste_id, icons::PASTE_TABLE, paste_tip, p).ld_click(
                     true,
                     cx.listener(move |this, _, _, cx| this.paste_side(left, cx)),
                 ),
             )
             .child(label)
+            .children(self.sheet_picker(left, cx))
             .into_any_element()
     }
 
@@ -270,7 +269,7 @@ impl TableView {
             let count = counts.map_or(0, |counts| filter.count(&counts));
             ld_chip(
                 format!("table-chip-{}", filter.key()),
-                filter.label(),
+                tr(filter.label()),
                 count,
                 chip_tone(filter),
                 self.prefs.filter == filter,
@@ -294,31 +293,31 @@ impl TableView {
             .bg(p.panel)
             .border_b_1()
             .border_color(p.line)
-            .child(self.delimiter_menu(cx))
+            .children(self.shows_delimiter().then(|| self.delimiter_menu(cx)))
             .child(toggle(
                 "table-header",
-                "First row is a header",
-                "Treat the first row as column names",
+                tr("First row is a header"),
+                tr("Treat the first row as column names"),
                 self.prefs.header,
                 |prefs| prefs.header = !prefs.header,
             ))
             .child(toggle(
                 "table-ignore-case",
-                "Ignore case",
-                "Compare text without regard to upper and lower case",
+                tr("Ignore case"),
+                tr("Compare text without regard to upper and lower case"),
                 self.prefs.ignore_case,
                 |prefs| prefs.ignore_case = !prefs.ignore_case,
             ))
             .child(toggle(
                 "table-trim",
-                "Trim spaces",
-                "Ignore spaces at the start and end of a cell",
+                tr("Trim spaces"),
+                tr("Ignore spaces at the start and end of a cell"),
                 self.prefs.trim,
                 |prefs| prefs.trim = !prefs.trim,
             ))
             .child(toggle(
                 "table-numbers",
-                "Compare numbers by value",
+                tr("Compare numbers by value"),
                 NUMBERS_TOOLTIP,
                 self.prefs.numbers,
                 |prefs| prefs.numbers = !prefs.numbers,
@@ -330,14 +329,19 @@ impl TableView {
                     .test_support()
                     .gap(px(6.))
                     .items_center()
-                    .tooltip(|window, cx| ld_tip(KEYS_TOOLTIP.into(), window, cx))
-                    .child(div().flex_none().text_color(p.muted).child("Key columns"))
+                    .tooltip(|window, cx| ld_tip(tr(KEYS_TOOLTIP).into(), window, cx))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(p.muted)
+                            .child(tr("Key columns")),
+                    )
                     .child(
                         div().w(px(260.)).child(
-                            Input::new(&self.keys_input)
+                            ld_input(&self.keys_input)
                                 .font(fonts.code.clone())
                                 .text_size(px(CODE_SIZE))
-                                .aria_label("Key columns"),
+                                .aria_label(tr("Key columns")),
                         ),
                     ),
             )
@@ -348,18 +352,27 @@ impl TableView {
     /// "Delimiter: Auto", with Auto and the four delimiters in its menu.
     fn delimiter_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let chosen = self.prefs.delimiter;
+        let csv_only = self.delimiter_csv_only();
         let this = cx.entity().downgrade();
-        ld_dropdown(
+        let button = ld_dropdown(
             "table-delimiter",
-            format!("Delimiter: {}", chosen.map_or("Auto", Delimiter::label)),
+            trf(
+                "Delimiter: {}",
+                &[&chosen.map_or(tr("Auto"), |d| tr(d.label()))],
+            ),
             UI_SIZE,
-        )
-        .dropdown_menu(move |menu, _, _| {
+        );
+        let button = if csv_only {
+            button.tooltip(tr("Applies to the CSV side only"))
+        } else {
+            button
+        };
+        button.dropdown_menu(move |menu, _, _| {
             let choices = std::iter::once(None).chain(Delimiter::ALL.map(Some));
             choices.fold(menu, |menu, choice| {
                 let this = this.clone();
                 menu.item(
-                    PopupMenuItem::new(choice.map_or("Auto", Delimiter::label))
+                    crate::ui::menu::row(choice.map_or(tr("Auto"), |d| tr(d.label())))
                         .checked(chosen == choice)
                         .on_click(move |_, _, cx| {
                             let _ = this.update(cx, |view, cx| {

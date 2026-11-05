@@ -57,14 +57,18 @@ impl Source {
 
 fn place_words(place: OddPlace) -> &'static str {
     match place {
-        OddPlace::Comment => "in a comment",
-        OddPlace::Indent => "in the indentation",
-        OddPlace::Text => "in the text",
+        OddPlace::Comment => tr("in a comment"),
+        OddPlace::Indent => tr("in the indentation"),
+        OddPlace::Text => tr("in the text"),
     }
 }
 
 fn characters(n: usize) -> String {
-    format!("{n} invisible character{}", if n == 1 { "" } else { "s" })
+    if n == 1 {
+        trf("{} invisible character", &[&n])
+    } else {
+        trf("{} invisible characters", &[&n])
+    }
 }
 
 impl TextView {
@@ -197,9 +201,9 @@ impl TextView {
     pub fn odd_button_text(&self) -> Option<String> {
         let (warn, info) = self.odd_counts()?;
         Some(if warn > 0 {
-            format!("⚠ {} in the text", characters(warn))
+            trf("⚠ {} in the text", &[&characters(warn)])
         } else {
-            format!("{} in comments or indentation", characters(info))
+            trf("{} in comments or indentation", &[&characters(info)])
         })
     }
 
@@ -211,12 +215,14 @@ impl TextView {
     }
 
     fn odd_hit_text((left, hit): (bool, &OddHit)) -> String {
-        format!(
+        trf(
             "{} line {}: {} ({})",
-            if left { "Left" } else { "Right" },
-            hit.line + 1,
-            odd_info(hit.ch).1,
-            place_words(hit.place)
+            &[
+                &tr(if left { "Left" } else { "Right" }),
+                &(hit.line + 1),
+                &odd_info(hit.ch).1,
+                &place_words(hit.place),
+            ],
         )
     }
 
@@ -228,19 +234,19 @@ impl TextView {
                 .as_deref()
                 .map_or(0, |scan| scan.count)
         };
-        let mut tip = format!(
+        let mut tip = trf(
             "Left {} · Right {}. Click for the next one (Shift+click: previous).",
-            count(true),
-            count(false)
+            &[&count(true), &count(false)],
         );
         for hit in (0..TIP_HITS).map_while(|at| self.odd_hit(at)) {
             tip.push('\n');
             tip.push_str(&Self::odd_hit_text(hit));
         }
         if warn > 0 {
-            tip.push_str(
-                "\n\nInvisible characters inside values can make equal-looking text differ.",
-            );
+            tip.push_str("\n\n");
+            tip.push_str(tr(
+                "Invisible characters inside values can make equal-looking text differ.",
+            ));
         }
         Some(tip)
     }

@@ -22,11 +22,12 @@ pub const VIEW: &str = "folder.view";
 pub const ODD_SCAN: &str = "folder.odd_scan";
 pub const CONFIRM_COPY: &str = "folder.confirm_copy";
 pub const DOUBLE_CLICK: &str = "folder.double_click";
+pub const FIND_MOVES: &str = "folder.find_moves";
 
 /// The largest time tolerance a setting may hold: one day, in seconds.
 pub const MAX_TOLERANCE_SECS: u64 = 86_400;
 
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 10] = [
     CRITERION,
     TIME_TOLERANCE,
     IGNORE_DST,
@@ -36,6 +37,7 @@ const KEYS: [&str; 9] = [
     ODD_SCAN,
     CONFIRM_COPY,
     DOUBLE_CLICK,
+    FIND_MOVES,
 ];
 
 /// Whether the rows are a tree or one flat list of files.
@@ -93,6 +95,8 @@ pub struct FolderPrefs {
     pub confirm_copy: bool,
     /// A double-click enters a folder instead of opening or closing it.
     pub enter_folders: bool,
+    /// Tag a left-only and a right-only file with the same bytes (Content and Rules only).
+    pub find_moves: bool,
 }
 
 impl Default for FolderPrefs {
@@ -109,6 +113,7 @@ impl Default for FolderPrefs {
             odd_scan: true,
             confirm_copy: true,
             enter_folders: false,
+            find_moves: true,
         }
     }
 }
@@ -150,6 +155,7 @@ impl FolderPrefs {
             confirm_copy: flag(CONFIRM_COPY, default.confirm_copy),
             enter_folders: text(DOUBLE_CLICK)
                 .map_or(default.enter_folders, |value| value == "enter"),
+            find_moves: flag(FIND_MOVES, default.find_moves),
         }
     }
 
@@ -184,6 +190,7 @@ impl FolderPrefs {
                     "toggle"
                 },
             ),
+            FIND_MOVES => settings::set_bool(path, key, self.find_moves),
             _ => Ok(()),
         }
     }
@@ -198,6 +205,7 @@ impl FolderPrefs {
                 ignore_dst: self.ignore_dst,
             },
             format_important: self.format_important,
+            find_moves: self.find_moves,
             ..FolderOptions::default()
         }
     }
@@ -208,6 +216,7 @@ impl FolderPrefs {
         self.tolerance_secs = options.quick.tolerance.as_secs();
         self.ignore_dst = options.quick.ignore_dst;
         self.format_important = options.format_important;
+        self.find_moves = options.find_moves;
     }
 }
 
@@ -247,12 +256,13 @@ mod tests {
         assert_eq!(none.filter, FolderFilter::Mismatch);
         assert_eq!(none.layout, Layout::Tree);
         assert!(!none.enter_folders);
+        assert!(none.find_moves, "looking for moved files is on by default");
         none.save(None).unwrap();
 
         let defaults = FolderPrefs::default().options();
         assert_eq!(defaults.mode, CompareMode::Quick);
         assert_eq!(defaults.quick.tolerance, Duration::from_secs(2));
-        assert!(defaults.quick.ignore_dst);
+        assert!(defaults.quick.ignore_dst && defaults.find_moves);
 
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("settings.json");
@@ -266,20 +276,21 @@ mod tests {
             odd_scan: false,
             confirm_copy: false,
             enter_folders: true,
+            find_moves: false,
         };
         every_field.save(Some(&file)).unwrap();
         assert_eq!(FolderPrefs::load(Some(&file)), every_field);
         let options = every_field.options();
         assert_eq!(options.mode, CompareMode::Rules);
         assert_eq!(options.quick.tolerance, Duration::from_secs(90));
-        assert!(!options.quick.ignore_dst && options.format_important);
+        assert!(!options.quick.ignore_dst && options.format_important && !options.find_moves);
         let mut taken = FolderPrefs::default();
         taken.take_options(&options);
         assert_eq!(
             (taken.mode, taken.tolerance_secs, taken.ignore_dst),
             (CompareMode::Rules, 90, false)
         );
-        assert!(taken.format_important);
+        assert!(taken.format_important && !taken.find_moves);
 
         std::fs::write(
             &file,

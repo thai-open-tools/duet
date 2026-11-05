@@ -184,7 +184,7 @@ impl Workspace {
                 // Another tab may already show this set of files: this one closes, unless it
                 // holds choices.
                 if !self.rekey(index, new, window, cx) {
-                    view.update(cx, |v, cx| v.show_notice(MERGED_ELSEWHERE, cx));
+                    view.update(cx, |v, cx| v.show_notice(tr(MERGED_ELSEWHERE), cx));
                 }
                 if let (Some(left), Some(base), Some(right)) = (left, base, right) {
                     self.remember_entry(
@@ -203,7 +203,7 @@ impl Workspace {
                 // The swapped set is open in another tab and this one holds choices: the
                 // sides go back, so the key still names what the tab shows (M6).
                 if !self.rekey(index, new, window, cx) {
-                    view.update(cx, |v, cx| v.undo_swap(MERGED_ELSEWHERE, window, cx));
+                    view.update(cx, |v, cx| v.undo_swap(tr(MERGED_ELSEWHERE), window, cx));
                 }
             }
         }

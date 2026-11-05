@@ -5,16 +5,17 @@
 use duet_core::hex::HexSource;
 use duet_core::hex::find::{Direction, find, parse_pattern};
 use gpui_kit::AnyElement;
-use gpui_kit::component::input::Input;
 
 use super::*;
+use crate::i18n::{tr, tr_key, trf};
+use crate::ui::edit_menu::ld_input;
 use crate::ui::fonts::SMALL_SIZE;
 use crate::ui::icons;
 use crate::ui::style::{LdExt as _, ld_icon_button, ld_segment, ld_segmented, ld_tip};
 
-const FIND_TOOLTIP: &str = "Enter: next match. Shift+Enter: previous match.";
-const WRAPPED_START: &str = "Wrapped to the start of the file.";
-const WRAPPED_END: &str = "Wrapped to the end of the file.";
+const FIND_TOOLTIP: &str = tr_key("Enter: next match. Shift+Enter: previous match.");
+const WRAPPED_START: &str = tr_key("Wrapped to the start of the file.");
+const WRAPPED_END: &str = tr_key("Wrapped to the end of the file.");
 
 /// The find bar's state while it is open.
 pub(super) struct FindBar {
@@ -54,7 +55,7 @@ impl HexView {
             return;
         }
         if self.find.is_none() {
-            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(tr("Find")));
             let subscription = cx.subscribe_in(
                 &input,
                 window,
@@ -75,6 +76,15 @@ impl HexView {
             window.focus(&bar.input.focus_handle(cx), cx);
         }
         cx.notify();
+    }
+
+    /// The language changed: the find field's placeholder is said again.
+    pub(super) fn relabel_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(bar) = &self.find {
+            bar.input.update(cx, |state, cx| {
+                state.set_placeholder(tr("Find"), window, cx)
+            });
+        }
     }
 
     /// Stops a running search and drops the bar; the keys go back to the rows.
@@ -194,15 +204,15 @@ impl HexView {
                 // The cursor move may have said "Showing all rows…": both notices stay.
                 let shown = self.notice.take();
                 let wrap = wrapped.then_some(match dir {
-                    Direction::Forward => WRAPPED_START,
-                    Direction::Backward => WRAPPED_END,
+                    Direction::Forward => tr(WRAPPED_START),
+                    Direction::Backward => tr(WRAPPED_END),
                 });
                 self.notice = match (shown, wrap) {
                     (Some(shown), Some(wrap)) => Some(format!("{shown} {wrap}").into()),
                     (shown, wrap) => shown.or_else(|| wrap.map(Into::into)),
                 };
             }
-            None => self.notice = Some(format!("Not found: {typed}.").into()),
+            None => self.notice = Some(trf("Not found: {}.", &[&typed]).into()),
         }
         cx.notify();
     }
@@ -270,39 +280,39 @@ impl HexView {
                         .id("hex-find-input")
                         .test_support()
                         .w(px(220.))
-                        .tooltip(|window, cx| ld_tip(FIND_TOOLTIP.into(), window, cx))
-                        .child(Input::new(&bar.input).aria_label("Find")),
+                        .tooltip(|window, cx| ld_tip(tr(FIND_TOOLTIP).into(), window, cx))
+                        .child(ld_input(&bar.input).aria_label(tr("Find"))),
                 )
                 .child(ld_segmented(
                     "hex-find-mode",
                     [
-                        mode("hex-find-hex", "Hex bytes", true, false),
-                        mode("hex-find-text", "Text", false, true),
+                        mode("hex-find-hex", tr("Hex bytes"), true, false),
+                        mode("hex-find-text", tr("Text"), false, true),
                     ],
                     p,
                 ))
                 .child(ld_segmented(
                     "hex-find-side",
                     [
-                        side("hex-find-left", "Left", true, false),
-                        side("hex-find-right", "Right", false, true),
+                        side("hex-find-left", tr("Left"), true, false),
+                        side("hex-find-right", tr("Right"), false, true),
                     ],
                     p,
                 ))
                 .child(
-                    ld_icon_button("hex-find-prev", icons::PREV, "Previous (Shift+F3)", p)
+                    ld_icon_button("hex-find-prev", icons::PREV, tr("Previous (Shift+F3)"), p)
                         .ld_click(
                             true,
                             cx.listener(|this, _, _, cx| this.step_find(false, cx)),
                         ),
                 )
                 .child(
-                    ld_icon_button("hex-find-next", icons::NEXT, "Next (F3)", p)
+                    ld_icon_button("hex-find-next", icons::NEXT, tr("Next (F3)"), p)
                         .ld_click(true, cx.listener(|this, _, _, cx| this.step_find(true, cx))),
                 )
                 .child(div().flex_1())
                 .child(
-                    ld_icon_button("hex-find-close", icons::CLOSE, "Close (Esc)", p).ld_click(
+                    ld_icon_button("hex-find-close", icons::CLOSE, tr("Close (Esc)"), p).ld_click(
                         true,
                         cx.listener(|this, _, window, cx| this.close_find(window, cx)),
                     ),

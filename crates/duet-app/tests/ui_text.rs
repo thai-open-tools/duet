@@ -4676,3 +4676,455 @@ async fn inserting_after_an_unterminated_last_line_undoes_exactly(cx: &mut TestA
     press(cx, handle, "ctrl-z");
     assert_eq!(right_text(cx, &view).as_bytes(), b"a\nb");
 }
+
+#[gpui_kit::test]
+async fn save_as_during_a_compare_says_so_in_thai_and_clears_when_it_ends(cx: &mut TestAppContext) {
+    use duet_app::i18n::{Lang, scoped, tr};
+    let _th = scoped(Lang::Th);
+    let (dir, handle, view) = open_text(cx, "a\n", "b\n");
+    wait_loaded(cx, handle, &view).await;
+    dirty_left(cx, &view);
+    let (a, b) = (dir.path().join("a.txt"), dir.path().join("b.txt"));
+    view.update(cx, |v, cx| v.load_paths(a, b, cx));
+    assert!(!save_as(cx, handle, &view, true, dir.path().join("r.txt")).await);
+    let thai = tr("Wait for the compare to finish.");
+    assert_ne!(thai, "Wait for the compare to finish.");
+    assert_eq!(notice(cx, &view).as_deref(), Some(thai));
+    wait_loaded(cx, handle, &view).await;
+    assert_eq!(notice(cx, &view), None, "the compare ending clears it");
+}
+
+#[gpui_kit::test]
+async fn a_still_saving_refusal_in_thai_survives_the_save_that_finishes(cx: &mut TestAppContext) {
+    use duet_app::i18n::{Lang, scoped, trf};
+    let _th = scoped(Lang::Th);
+    let (dir, handle, view) = open_text(cx, "a\n", "b\n");
+    wait_loaded(cx, handle, &view).await;
+    dirty_left(cx, &view);
+    let target = dir.path().join("q.txt");
+    let first = save_as(cx, handle, &view, true, target.clone());
+    assert!(!save_as(cx, handle, &view, true, target.clone()).await);
+    let thai = trf("Still saving {}.", &[&"q.txt"]);
+    assert_ne!(thai, "Still saving q.txt.");
+    assert_eq!(notice(cx, &view).as_deref(), Some(thai.as_str()));
+    assert!(first.await);
+    assert_eq!(notice(cx, &view).as_deref(), Some(thai.as_str()));
+}
+
+#[gpui_kit::test]
+async fn a_result_built_before_a_switch_is_said_in_the_language_now(cx: &mut TestAppContext) {
+    use duet_app::i18n::{Lang, live, scoped, tr, trf};
+    use duet_app::text::job::{TextRequest, run};
+    use duet_core::cancel::CancelToken;
+    let (dir, handle, view) = open_text(cx, "{\"a\":1}", "{\"a\":2}");
+    wait_loaded(cx, handle, &view).await;
+    let mut request = TextRequest::new(dir.path().join("a.txt"), dir.path().join("b.txt"));
+    request.format = true;
+    // The job ran in English; the language changed before its result landed.
+    let (ready, failed) = {
+        let _en = scoped(Lang::En);
+        (
+            run(&request, &CancelToken::new()),
+            TextOutcome::Failed(live("Compare cancelled.")),
+        )
+    };
+    let _th = scoped(Lang::Th);
+    assert_ne!(tr("Compare cancelled."), "Compare cancelled.");
+    view.update(cx, |v, cx| {
+        v.reload(cx);
+        let generation = v.job_generation();
+        v.apply_for_test(generation, ready, cx);
+    });
+    let notes = view.read_with(cx, |v, _| v.model().unwrap().notes());
+    let left = trf("{}: formatted {}", &[&tr("Left"), &"JSON"]);
+    assert_eq!(notes.first(), Some(&left));
+    assert_ne!(left, "Left: formatted JSON");
+    view.update(cx, |v, cx| {
+        v.reload(cx);
+        let generation = v.job_generation();
+        v.apply_for_test(generation, failed, cx);
+    });
+    let message = view.read_with(cx, |v, _| v.message().map(str::to_owned));
+    assert_eq!(message.as_deref(), Some(tr("Compare cancelled.")));
+}
+
+// ---- Plan D: Sort keys ----
+
+const LEFT_JSON: &str = "{\"b\":2,\"a\":{\"d\":4,\"c\":3}}";
+const RIGHT_JSON: &str = "{\n  \"a\": {\n    \"c\": 3,\n    \"d\": 4\n  },\n  \"b\": 2\n}";
+
+#[gpui_kit::test]
+async fn the_sort_keys_button_sorts_both_sides_and_toggles_off(cx: &mut TestAppContext) {
+    let (_dir, handle, view) = open_text(cx, LEFT_JSON, RIGHT_JSON);
+    wait_loaded(cx, handle, &view).await;
+    assert!(view.read_with(cx, |v, _| v.model().unwrap().block_count()) > 0);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("text-sort-keys", cx);
+    })
+    .unwrap();
+    wait_loaded(cx, handle, &view).await;
+    let (blocks, status, on) = view.read_with(cx, |v, _| {
+        let m = v.model().unwrap();
+        (
+            m.block_count(),
+            duet_app::text::model::status_text(m),
+            v.request().sort_keys,
+        )
+    });
+    assert_eq!(blocks, 0);
+    assert!(on);
+    assert!(status.contains("sorted JSON keys"), "{status}");
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("text-sort-keys", cx);
+    })
+    .unwrap();
+    wait_loaded(cx, handle, &view).await;
+    let (blocks, text, on) = view.read_with(cx, |v, _| {
+        let m = v.model().unwrap();
+        (
+            m.block_count(),
+            m.left().text().map(str::to_owned),
+            v.request().sort_keys,
+        )
+    });
+    assert!(blocks > 0, "the differences return");
+    assert_eq!(text.as_deref(), Some(LEFT_JSON), "the text is the file's");
+    assert!(!on);
+}
+
+#[gpui_kit::test]
+async fn typing_while_sort_keys_is_on_is_refused(cx: &mut TestAppContext) {
+    let changed = RIGHT_JSON.replace("4", "5");
+    let (dir, handle, view) = open_text(cx, LEFT_JSON, &changed);
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.set_sort_keys_for_test(true, cx));
+    wait_loaded(cx, handle, &view).await;
+    let before = view.read_with(cx, |v, _| {
+        v.model().unwrap().left().text().map(str::to_owned)
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click_at(("text-row", 0usize), point(px(110.), px(10.)), cx);
+        window.input("x", cx);
+    })
+    .unwrap();
+    assert!(
+        notice(cx, &view)
+            .unwrap()
+            .contains("The sorted view is read-only. Turn Sort keys off to edit.")
+    );
+    press(cx, handle, "f8");
+    press(cx, handle, "alt-right");
+    assert_eq!(
+        notice(cx, &view).as_deref(),
+        Some("The sorted view is read-only. Turn Sort keys off to edit.")
+    );
+    let (after, dirty) = view.read_with(cx, |v, _| {
+        (
+            v.model().unwrap().left().text().map(str::to_owned),
+            v.is_dirty(),
+        )
+    });
+    assert_eq!(after, before, "nothing was typed");
+    assert!(!dirty);
+    assert!(view.read_with(cx, |v, _| !v.save_enabled(true) && !v.save_enabled(false)));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        LEFT_JSON,
+        "nothing on disk changed"
+    );
+}
+
+#[gpui_kit::test]
+async fn turning_sort_keys_on_with_unsaved_edits_asks_first(cx: &mut TestAppContext) {
+    let (_dir, handle, view) = open_text(cx, LEFT_JSON, RIGHT_JSON);
+    wait_loaded(cx, handle, &view).await;
+    dirty_left(cx, &view);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("text-sort-keys", cx);
+    })
+    .unwrap();
+    wait_for_prompt(cx).await;
+    cx.simulate_prompt_answer("Cancel");
+    cx.run_until_parked();
+    let (on, dirty) = view.read_with(cx, |v, _| (v.request().sort_keys, v.is_dirty()));
+    assert!(!on, "Cancel leaves the toggle off");
+    assert!(dirty, "and the edit");
+    assert!(line_of(&view, cx, true, 0).starts_with('z'));
+}
+
+#[gpui_kit::test]
+async fn find_and_go_to_line_use_the_sorted_lines(cx: &mut TestAppContext) {
+    let (_dir, handle, view) = open_text(cx, LEFT_JSON, RIGHT_JSON);
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.set_sort_keys_for_test(true, cx));
+    wait_loaded(cx, handle, &view).await;
+    press(cx, handle, "ctrl-f");
+    cx.update_window(handle, |_, window, cx| window.input("\"c\"", cx))
+        .unwrap();
+    assert_eq!(wait_found(cx, handle, &view).await, "2 matches");
+    // "c" is on line 3 of the sorted text; in the file it is all on line 1.
+    let ok = view.update(cx, |v, cx| v.go_to_line(true, "3", cx));
+    assert!(ok);
+    let (marked, expected, line) = view.read_with(cx, |v, _| {
+        let m = v.model().unwrap();
+        (
+            v.marked_row(),
+            m.row_of_line(true, 2),
+            m.left().line(2).into_owned(),
+        )
+    });
+    assert_eq!(marked, expected);
+    assert_eq!(line, "    \"c\": 3,");
+    let status = view.read_with(cx, |v, _| {
+        duet_app::text::model::status_text(v.model().unwrap())
+    });
+    assert!(
+        status.contains("Line numbers are those of the sorted text."),
+        "{status}"
+    );
+}
+
+#[gpui_kit::test]
+async fn sort_keys_over_64_mib_is_refused_with_a_notice(cx: &mut TestAppContext) {
+    let line = format!("{}\n", "x".repeat(1023));
+    let big = line.repeat(66_560);
+    let (_dir, handle, view) = open_text(cx, &big, &big);
+    drop(big);
+    wait_loaded(cx, handle, &view).await;
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| v.set_sort_keys(true, window, cx))
+    })
+    .unwrap();
+    let (on, notice, busy) = view.read_with(cx, |v, _| {
+        (
+            v.request().sort_keys,
+            v.notice().map(str::to_owned),
+            v.is_busy(),
+        )
+    });
+    assert!(!on);
+    assert!(!busy, "nothing reloads");
+    assert_eq!(
+        notice.as_deref(),
+        Some("Sort keys is not available for files over 64 MiB.")
+    );
+}
+
+#[gpui_kit::test]
+async fn the_notes_name_the_side_and_the_line(cx: &mut TestAppContext) {
+    let (_dir, handle, view) = open_text(cx, LEFT_JSON, "{\n  \"a\": 1,\n  \"b\": }");
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.set_sort_keys_for_test(true, cx));
+    wait_loaded(cx, handle, &view).await;
+    let status = view.read_with(cx, |v, _| {
+        duet_app::text::model::status_text(v.model().unwrap())
+    });
+    assert!(
+        status.contains("Right: expected a value (line 3 of the file), shown as is"),
+        "{status}"
+    );
+    assert!(status.contains("Left: sorted JSON keys"), "{status}");
+}
+
+#[gpui_kit::test]
+async fn the_thai_button_tooltip_and_notes_read_in_thai(cx: &mut TestAppContext) {
+    use duet_app::i18n::{Lang, missing_keys_for_test, scoped, tr, trf};
+    let _th = scoped(Lang::Th);
+    let (_dir, handle, view) = open_text(cx, LEFT_JSON, "{\"a\": 1,}");
+    wait_loaded(cx, handle, &view).await;
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("text-sort-keys", cx);
+    })
+    .unwrap();
+    wait_loaded(cx, handle, &view).await;
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    let status = view.read_with(cx, |v, _| {
+        duet_app::text::model::status_text(v.model().unwrap())
+    });
+    let sorted = trf("{}: sorted {} keys", &[&tr("Left"), &"JSON"]);
+    assert_ne!(sorted, "Left: sorted JSON keys");
+    assert!(status.contains(&sorted), "{status}");
+    assert!(
+        status.contains(tr("Line numbers are those of the sorted text.")),
+        "{status}"
+    );
+    assert!(
+        status.contains(tr("unexpected comma before closing brace")),
+        "{status}"
+    );
+    assert_eq!(missing_keys_for_test(), Vec::<String>::new());
+}
+
+// ---- Plan D fix wave ----
+
+const SAVE_AS_SORTED: &str =
+    "The sorted view can't be saved as a new file. Turn Sort keys off first.";
+const SAVE_AS_FORMATTED: &str =
+    "The formatted view can't be saved as a new file. Turn Format off first.";
+
+fn status_of(cx: &mut TestAppContext, view: &Entity<TextView>) -> String {
+    view.read_with(cx, |v, _| {
+        duet_app::text::model::status_text(v.model().unwrap())
+    })
+}
+
+/// Save As in a sorted or formatted view must write nothing: the view holds the changed text.
+async fn save_as_of_a_view_writes_nothing(cx: &mut TestAppContext, sorted: bool) {
+    let (dir, handle, view) = open_text(cx, LEFT_JSON, RIGHT_JSON);
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| {
+        if sorted {
+            v.set_sort_keys_for_test(true, cx)
+        } else {
+            v.set_format_for_test(true, cx)
+        }
+    });
+    wait_loaded(cx, handle, &view).await;
+    let wanted = if sorted {
+        SAVE_AS_SORTED
+    } else {
+        SAVE_AS_FORMATTED
+    };
+    let elsewhere = dir.path().join("copy.txt");
+    for (left, name, original) in [(true, "a.txt", LEFT_JSON), (false, "b.txt", RIGHT_JSON)] {
+        let own = dir.path().join(name);
+        for target in [elsewhere.clone(), own.clone()] {
+            assert!(!save_as(cx, handle, &view, left, target).await);
+            assert_eq!(notice(cx, &view).as_deref(), Some(wanted));
+            assert!(!elsewhere.exists(), "no new file");
+            assert_eq!(std::fs::read(&own).unwrap(), original.as_bytes(), "{name}");
+        }
+        assert!(
+            !run_path_item(cx, handle, &view, left, "Save as…"),
+            "the menu item is off"
+        );
+    }
+}
+
+#[gpui_kit::test]
+async fn save_as_in_the_sorted_view_writes_nothing(cx: &mut TestAppContext) {
+    save_as_of_a_view_writes_nothing(cx, true).await;
+}
+
+#[gpui_kit::test]
+async fn save_as_in_the_formatted_view_writes_nothing(cx: &mut TestAppContext) {
+    save_as_of_a_view_writes_nothing(cx, false).await;
+}
+
+#[gpui_kit::test]
+async fn ctrl_shift_s_in_a_sorted_or_formatted_view_says_to_turn_it_off(cx: &mut TestAppContext) {
+    for sorted in [true, false] {
+        let (_dir, handle, view) = open_text(cx, LEFT_JSON, RIGHT_JSON);
+        wait_loaded(cx, handle, &view).await;
+        view.update(cx, |v, cx| {
+            if sorted {
+                v.set_sort_keys_for_test(true, cx)
+            } else {
+                v.set_format_for_test(true, cx)
+            }
+        });
+        wait_loaded(cx, handle, &view).await;
+        assert_eq!(notice(cx, &view), None);
+        press(cx, handle, "ctrl-shift-s");
+        let wanted = if sorted {
+            SAVE_AS_SORTED
+        } else {
+            SAVE_AS_FORMATTED
+        };
+        assert_eq!(notice(cx, &view).as_deref(), Some(wanted));
+    }
+}
+
+#[gpui_kit::test]
+async fn copying_from_a_sorted_side_to_one_that_did_not_parse_is_refused(cx: &mut TestAppContext) {
+    let (dir, handle, view) = open_named(cx, "x.yaml", "b: 1\na: 2\n", "a: [1\n");
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.set_sort_keys_for_test(true, cx));
+    wait_loaded(cx, handle, &view).await;
+    assert_eq!(
+        line_of(&view, cx, true, 0),
+        "a: 2",
+        "the left side is sorted"
+    );
+    let wanted = "The sorted view can't be copied from. Turn Sort keys off first.";
+    assert!(!view.update(cx, |v, cx| v.copy_all(false, cx)));
+    assert_eq!(notice(cx, &view).as_deref(), Some(wanted));
+    assert!(!view.update(cx, |v, cx| v.copy_block(0, false, cx)));
+    let (right, dirty, can_save) = view.read_with(cx, |v, _| {
+        (
+            v.model().unwrap().right().text().map(str::to_owned),
+            v.is_dirty(),
+            v.save_enabled(false),
+        )
+    });
+    assert_eq!(right.as_deref(), Some("a: [1\n"));
+    assert!(!dirty && !can_save, "nothing to save");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("right").join("x.yaml")).unwrap(),
+        "a: [1\n"
+    );
+}
+
+#[gpui_kit::test]
+async fn copying_from_a_formatted_side_is_refused(cx: &mut TestAppContext) {
+    let (_dir, handle, view) = open_named(cx, "x.json", "{\"b\":1}", "{\"a\":");
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.set_format_for_test(true, cx));
+    wait_loaded(cx, handle, &view).await;
+    assert!(!view.update(cx, |v, cx| v.copy_all(false, cx)));
+    assert_eq!(
+        notice(cx, &view).as_deref(),
+        Some("The formatted view can't be copied from. Turn Format off first.")
+    );
+    assert!(view.read_with(cx, |v, _| !v.is_dirty()));
+}
+
+#[gpui_kit::test]
+async fn f9_keeps_each_note_with_its_side(cx: &mut TestAppContext) {
+    let (_dir, handle, view) = open_text(cx, LEFT_JSON, "{\"a\": 1,}");
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.set_sort_keys_for_test(true, cx));
+    wait_loaded(cx, handle, &view).await;
+    let broken = "unexpected comma before closing brace (line 1 of the file), shown as is";
+    let before = status_of(cx, &view);
+    assert!(before.contains("Left: sorted JSON keys"), "{before}");
+    assert!(before.contains(&format!("Right: {broken}")), "{before}");
+    press(cx, handle, "f9");
+    wait_loaded(cx, handle, &view).await;
+    let after = status_of(cx, &view);
+    assert!(after.contains("Right: sorted JSON keys"), "{after}");
+    assert!(after.contains(&format!("Left: {broken}")), "{after}");
+    assert!(!after.contains("Left: sorted"), "{after}");
+    assert!(!after.contains("Right: unexpected"), "{after}");
+}
+
+#[gpui_kit::test]
+async fn a_sorted_view_that_matches_says_so(cx: &mut TestAppContext) {
+    let (_dir, handle, view) = open_text(cx, LEFT_JSON, RIGHT_JSON);
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.set_sort_keys_for_test(true, cx));
+    wait_loaded(cx, handle, &view).await;
+    let status = status_of(cx, &view);
+    assert!(status.contains("Same when sorted"), "{status}");
+    assert!(!status.contains("Identical"), "{status}");
+}
+
+#[gpui_kit::test]
+async fn the_thai_same_when_sorted_reads_in_thai(cx: &mut TestAppContext) {
+    use duet_app::i18n::{Lang, missing_keys_for_test, scoped, tr};
+    let _th = scoped(Lang::Th);
+    let (_dir, handle, view) = open_text(cx, LEFT_JSON, RIGHT_JSON);
+    wait_loaded(cx, handle, &view).await;
+    view.update(cx, |v, cx| v.set_sort_keys_for_test(true, cx));
+    wait_loaded(cx, handle, &view).await;
+    let status = status_of(cx, &view);
+    assert!(status.contains(tr("Same when sorted")), "{status}");
+    assert_eq!(tr("Same when sorted"), "เหมือนกันเมื่อเรียงคีย์");
+    assert_eq!(missing_keys_for_test(), Vec::<String>::new());
+}

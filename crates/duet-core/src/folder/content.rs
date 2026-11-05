@@ -40,7 +40,7 @@ pub fn files_equal(a: &Path, b: &Path, cancel: &CancelToken) -> Result<bool, Con
     files_equal_with(a, b, &mut buffers, cancel)
 }
 
-fn files_equal_with(
+pub(super) fn files_equal_with(
     a: &Path,
     b: &Path,
     buffers: &mut (Vec<u8>, Vec<u8>),
@@ -64,7 +64,7 @@ fn files_equal_with(
     }
 }
 
-fn read_full(file: &mut File, buf: &mut [u8]) -> io::Result<usize> {
+pub(super) fn read_full(file: &mut File, buf: &mut [u8]) -> io::Result<usize> {
     let mut filled = 0;
     while filled < buf.len() {
         match file.read(&mut buf[filled..]) {
@@ -168,7 +168,7 @@ impl Normalized {
 }
 
 /// Threads that read and decode whole files at once (PF9, R5): at most about 4 x 128 MiB.
-const READ_THREADS: usize = 4;
+pub(super) const READ_THREADS: usize = 4;
 
 /// One file pair that needs a verdict.
 struct Job {

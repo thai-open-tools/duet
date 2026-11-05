@@ -4,6 +4,7 @@
 
 use duet_core::text::merge::session::How;
 
+use crate::i18n::tr;
 use crate::merge::view::{
     MergeReset, MergeUseBase, MergeUseLeft, MergeUseLeftRight, MergeUseRight, MergeUseRightLeft,
     MergeView,
@@ -16,12 +17,12 @@ pub fn card_menu(view: &MergeView) -> Vec<MenuEntry> {
         return Vec::new();
     }
     vec![
-        MenuEntry::action(How::Left.label(), MergeUseLeft),
-        MenuEntry::action(How::Right.label(), MergeUseRight),
-        MenuEntry::action(How::LeftThenRight.label(), MergeUseLeftRight),
-        MenuEntry::action(How::RightThenLeft.label(), MergeUseRightLeft),
-        MenuEntry::action(How::Base.label(), MergeUseBase),
+        MenuEntry::action(tr(How::Left.label()), MergeUseLeft),
+        MenuEntry::action(tr(How::Right.label()), MergeUseRight),
+        MenuEntry::action(tr(How::LeftThenRight.label()), MergeUseLeftRight),
+        MenuEntry::action(tr(How::RightThenLeft.label()), MergeUseRightLeft),
+        MenuEntry::action(tr(How::Base.label()), MergeUseBase),
         MenuEntry::Separator,
-        MenuEntry::action("Reset to default", MergeReset),
+        MenuEntry::action(tr("Reset to default"), MergeReset),
     ]
 }

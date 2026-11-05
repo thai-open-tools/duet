@@ -35,12 +35,12 @@ impl Pattern {
 pub fn parse_pattern(text: &str, hex: bool) -> Result<Pattern, String> {
     if !hex {
         return if text.is_empty() {
-            Err("Type some text to find.".into())
+            Err(crate::i18n::tr_key("Type some text to find.").into())
         } else {
             Ok(Pattern::Text(text.to_string()))
         };
     }
-    let bad = || "Type hex bytes, such as 4D 5A.".to_string();
+    let bad = || crate::i18n::tr_key("Type hex bytes, such as 4D 5A.").to_string();
     let mut bytes = Vec::new();
     // Spaces separate bytes only; a pair never contains one.
     for token in text.split_whitespace() {

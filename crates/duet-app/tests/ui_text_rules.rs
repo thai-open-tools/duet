@@ -1003,3 +1003,21 @@ async fn saved_rules_open_with_a_row_for_each_line(cx: &mut TestAppContext) {
         "six saved rules must not open clipped to the three rows: {six_lines:?} {empty:?}"
     );
 }
+
+#[gpui_kit::test]
+async fn turning_sort_keys_on_drops_the_manual_alignments(cx: &mut TestAppContext) {
+    let (_dir, handle, view) = start_aligning(cx).await;
+    view.update(cx, |v, cx| v.finish_align(0, false, cx));
+    wait_loaded(cx, handle, &view).await;
+    assert_eq!(anchors(cx, &view), vec![(2, 0)]);
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| v.set_sort_keys(true, window, cx))
+    })
+    .unwrap();
+    wait_loaded(cx, handle, &view).await;
+    assert!(view.read_with(cx, |v, _| v.request().sort_keys));
+    assert!(
+        anchors(cx, &view).is_empty(),
+        "a pin names a line of the unsorted text"
+    );
+}

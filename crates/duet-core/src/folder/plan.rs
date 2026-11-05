@@ -489,7 +489,10 @@ fn guard_destination(dst_root: &Path, dst: &Path) -> Result<(), ActionError> {
     if !dst.starts_with(dst_root) {
         return Err(ActionError::Io {
             path: dst.to_path_buf(),
-            source: io::Error::new(io::ErrorKind::InvalidInput, "outside the compared folder"),
+            source: io::Error::new(
+                io::ErrorKind::InvalidInput,
+                crate::i18n::tr_key("outside the compared folder"),
+            ),
         });
     }
     actions::ensure_no_links_below(dst_root, dst)

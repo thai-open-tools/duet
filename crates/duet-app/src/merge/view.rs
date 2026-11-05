@@ -21,6 +21,8 @@ use gpui_kit::{
 };
 
 use crate::format::count_of;
+use crate::i18n::errors::{diff_error, merge_read_error};
+use crate::i18n::{LiveText, answers, tr, tr_key, trf};
 use crate::job::JobSlot;
 use crate::launch::MergePaths;
 use crate::palette::Palette;
@@ -72,21 +74,22 @@ pub const TEXT_CONTEXT: &str = "MergeText";
 pub const LEFT: usize = 0;
 pub const BASE: usize = 1;
 pub const RIGHT: usize = 2;
-pub const CANCELLED: &str = "Cancelled: the result is incomplete.";
+pub const CANCELLED: &str = tr_key("Cancelled: the result is incomplete.");
 /// Merge ▸ over choices that are not saved asks first (`js:209-212`).
-const MERGE_AGAIN: &str = "Merging again drops the conflict choices you have not saved.";
+const MERGE_AGAIN: &str = tr_key("Merging again drops the conflict choices you have not saved.");
+const MERGE_AGAIN_ANSWERS: [&str; 2] = [tr_key("Cancel"), tr_key("Merge again")];
 /// A file that lands over such choices only says so (`maybeAutoRun`).
-const FILES_CHOSEN: &str = "Files chosen: press Merge to merge again.";
+const FILES_CHOSEN: &str = tr_key("Files chosen: press Merge to merge again.");
 /// A choice or typing while a merge or a reload replaces the session would be lost (I3).
-const WAIT_MERGE: &str = "Merging…: wait for the new result.";
+const WAIT_MERGE: &str = tr_key("Merging…: wait for the new result.");
 /// A launch of an open set with another output (M8).
-const OUTPUT_KEPT: &str = "This merge is open already; its output is unchanged.";
+const OUTPUT_KEPT: &str = tr_key("This merge is open already; its output is unchanged.");
 /// Why a merge did not take the key of its set: another tab already shows it.
-pub const MERGED_ELSEWHERE: &str = "These files are already merged in another tab.";
+pub const MERGED_ELSEWHERE: &str = tr_key("These files are already merged in another tab.");
 /// The setting behind the "ignore trailing whitespace" option (R3).
 pub(super) const TRAIL_SETTING: &str = "merge.trail";
 /// Lower-case slot names for the notices.
-const SLOT_NAMES: [&str; 3] = ["left", "base", "right"];
+const SLOT_NAMES: [&str; 3] = [tr_key("left"), tr_key("base"), tr_key("right")];
 
 pub fn key_bindings() -> Vec<KeyBinding> {
     let c = Some(CONTEXT);
@@ -154,7 +157,7 @@ pub struct MergeView {
     window: AnyWindowHandle,
     slots: [Option<Arc<MergeText>>; 3],
     /// Why a slot could not be read, and the file it could not read, so F5 tries it again.
-    messages: [Option<SharedString>; 3],
+    messages: [Option<LiveText>; 3],
     failed: [Option<PathBuf>; 3],
     /// One load per slot, and the id of the load each slot waits for (0 for none). A result
     /// lands on the slot that holds its id, so a pending load moves with its slot (R13).
@@ -217,10 +220,19 @@ fn file_name(path: &Path) -> String {
 }
 
 /// What a slot says when its file could not be used.
-fn read_message(name: &str, err: &ReadError) -> String {
+fn read_message(name: &str, err: &ReadError) -> LiveText {
+    let name = name.to_owned();
     match err {
-        ReadError::Binary => format!("{name} is a binary file: only text files can be merged."),
-        err => format!("Can't open {name}: {err}"),
+        ReadError::Binary => LiveText::new(move || {
+            trf(
+                "{} is a binary file: only text files can be merged.",
+                &[&name],
+            )
+        }),
+        err => {
+            let err = err.clone();
+            LiveText::new(move || trf("Can't open {}: {}", &[&name, &merge_read_error(&err)]))
+        }
     }
 }
 
@@ -360,11 +372,27 @@ impl MergeView {
     /// edit may go ahead.
     pub(super) fn may_edit(&mut self, cx: &mut Context<Self>) -> bool {
         if self.replacing() {
-            self.notice = Some(WAIT_MERGE.into());
+            self.notice = Some(tr(WAIT_MERGE).into());
             cx.notify();
             return false;
         }
         true
+    }
+
+    /// The language changed. A notice is one-shot feedback in the old language, so it goes and the
+    /// status falls back to what it works out. What is stored is built again: a failed slot's
+    /// message, each card's text (its height can change, so the list measures it again where it
+    /// stands) and every placeholder. Nothing the person made is touched: the typed fields, the
+    /// choices and the scroll place stay.
+    pub fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.notice = None;
+        for message in self.messages.iter_mut().flatten() {
+            message.relabel();
+        }
+        self.cards.relabel();
+        self.relabel_inputs(window, cx);
+        self.relabel_result_fields(window, cx);
+        cx.notify();
     }
 
     pub fn notice(&self) -> Option<&str> {
@@ -403,7 +431,7 @@ impl MergeView {
         match self.output.as_deref() {
             None => self.set_output(Some(output), window, cx),
             Some(own) if own == output => {}
-            Some(_) => self.show_notice(OUTPUT_KEPT, cx),
+            Some(_) => self.show_notice(tr(OUTPUT_KEPT), cx),
         }
     }
 
@@ -487,7 +515,7 @@ impl MergeView {
             Err(ReadError::Cancelled) => {}
             Err(err) => {
                 self.slots[slot] = None;
-                self.messages[slot] = Some(read_message(&file_name(path), &err).into());
+                self.messages[slot] = Some(read_message(&file_name(path), &err));
                 self.failed[slot] = Some(path.to_path_buf());
                 self.edited[slot] = false;
                 self.fill_field(slot, window, cx);
@@ -501,7 +529,7 @@ impl MergeView {
             && read > 0
         {
             self.notice =
-                Some(format!("Reloaded {}.", count_of(read as u64, "file", "files")).into());
+                Some(trf("Reloaded {}.", &[&count_of(read as u64, "file", "files")]).into());
         }
         // Files mode merges on its own once all three are in (LocalDiff `maybeAutoRun`), but
         // never over choices that are not saved, unless Reload or Swap was agreed to (PF8).
@@ -512,7 +540,7 @@ impl MergeView {
             let force = std::mem::take(&mut self.force_next_run);
             let quiet = std::mem::take(&mut self.quiet_next_run);
             if !force && self.is_dirty() {
-                self.notice = Some(FILES_CHOSEN.into());
+                self.notice = Some(tr(FILES_CHOSEN).into());
             } else {
                 self.run_with(force, quiet, window, cx);
             }
@@ -545,15 +573,15 @@ impl MergeView {
             // The set another tab merges is refused at once, as a swap onto it is: the
             // choices stay, and the tab keeps the key of what it shows (M-68).
             if self.merged_elsewhere(&texts, cx) {
-                self.notice = Some(MERGED_ELSEWHERE.into());
+                self.notice = Some(tr(MERGED_ELSEWHERE).into());
                 cx.notify();
                 return;
             }
             let answer = window.prompt(
                 PromptLevel::Warning,
-                MERGE_AGAIN,
+                tr(MERGE_AGAIN),
                 None,
-                &["Cancel", "Merge again"],
+                &answers(&MERGE_AGAIN_ANSWERS),
                 cx,
             );
             cx.spawn_in(window, async move |this, cx| {
@@ -628,7 +656,7 @@ impl MergeView {
                 return;
             }
             Err(err) => {
-                self.notice = Some(format!("Can't merge: {err}.").into());
+                self.notice = Some(trf("Can't merge: {}.", &[&diff_error(&err)]).into());
                 cx.notify();
                 return;
             }
@@ -639,12 +667,12 @@ impl MergeView {
         let conflicts = session.conflicts().len();
         let auto = count_of(session.automatic() as u64, "change", "changes");
         let notice: SharedString = if session.changes().is_empty() {
-            "The three files are the same: nothing to merge.".to_owned()
+            tr("The three files are the same: nothing to merge.").to_owned()
         } else if conflicts > 0 {
             let needs = count_of(conflicts as u64, "conflict needs", "conflicts need");
-            format!("Merged {auto} automatically; {needs} a choice.")
+            trf("Merged {} automatically; {} a choice.", &[&auto, &needs])
         } else {
-            format!("Merged {auto} automatically: no conflicts.")
+            trf("Merged {} automatically: no conflicts.", &[&auto])
         }
         .into();
         if !quiet {
@@ -692,7 +720,7 @@ impl MergeView {
         self.force_next_run = false;
         self.quiet_next_run = false;
         self.reloaded = None;
-        self.notice = Some(CANCELLED.into());
+        self.notice = Some(tr(CANCELLED).into());
         cx.notify();
     }
 
@@ -714,12 +742,12 @@ impl MergeView {
             return message.to_string();
         }
         if self.loads_running() {
-            return "Reading…".to_owned();
+            return tr("Reading…").to_owned();
         }
         if self.merge_job.is_running() {
-            return "Merging…".to_owned();
+            return tr("Merging…").to_owned();
         }
-        "Choose the three files to merge.".to_owned()
+        tr("Choose the three files to merge.").to_owned()
     }
 }
 

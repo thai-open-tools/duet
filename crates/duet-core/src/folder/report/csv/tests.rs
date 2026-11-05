@@ -141,3 +141,33 @@ fn row_data_follows_localdiff() {
     assert_eq!(only.right_path, "");
     assert_eq!(only.right_size, None);
 }
+
+fn moved_item(state: ItemState, rel: &str, other: &str) -> ReportItem {
+    let mut it = item(rel, state);
+    it.moved_to = Some(other.to_owned());
+    it
+}
+
+#[test]
+fn csv_note_names_the_other_path() {
+    let left = moved_item(ItemState::LeftOnly, "a.txt", "new/a.txt");
+    let right = moved_item(ItemState::RightOnly, "new/a.txt", "a.txt");
+    assert_eq!(
+        row_data(&left, 0, &names(), None).note,
+        "Same contents as new/a.txt in PRD (moved or renamed)"
+    );
+    assert_eq!(
+        row_data(&right, 1, &names(), None).note,
+        "Same contents as a.txt in IWT (moved or renamed)"
+    );
+    let plain = item("a.txt", ItemState::LeftOnly);
+    assert_eq!(row_data(&plain, 0, &names(), None).note, "");
+}
+
+#[test]
+fn the_note_reads_in_thai_under_a_thai_report_scope() {
+    let left = moved_item(ItemState::LeftOnly, "a.txt", "new/a.txt");
+    let _th = crate::i18n::scoped(crate::i18n::Lang::Th);
+    let note = row_data(&left, 0, &names(), None).note;
+    assert_eq!(note, "เนื้อหาเดียวกับ new/a.txt ใน PRD (ย้ายหรือเปลี่ยนชื่อ)");
+}

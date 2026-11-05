@@ -29,22 +29,22 @@ impl How {
 
     pub fn label(self) -> &'static str {
         match self {
-            How::Left => "Use left",
-            How::Right => "Use right",
-            How::LeftThenRight => "Left + right",
-            How::RightThenLeft => "Right + left",
-            How::Base => "Use base",
-            How::Manual => "Edited",
+            How::Left => crate::i18n::tr_key("Use left"),
+            How::Right => crate::i18n::tr_key("Use right"),
+            How::LeftThenRight => crate::i18n::tr_key("Left + right"),
+            How::RightThenLeft => crate::i18n::tr_key("Right + left"),
+            How::Base => crate::i18n::tr_key("Use base"),
+            How::Manual => crate::i18n::tr_key("Edited"),
         }
     }
 
     pub fn tip(self) -> &'static str {
         match self {
-            How::Left => "Use the left text (Alt+\u{2190})",
-            How::Right => "Use the right text (Alt+\u{2192})",
-            How::LeftThenRight => "Use both: the left text, then the right",
-            How::RightThenLeft => "Use both: the right text, then the left",
-            How::Base => "Keep the base text and drop both sides' changes",
+            How::Left => crate::i18n::tr_key("Use the left text (Alt+\u{2190})"),
+            How::Right => crate::i18n::tr_key("Use the right text (Alt+\u{2192})"),
+            How::LeftThenRight => crate::i18n::tr_key("Use both: the left text, then the right"),
+            How::RightThenLeft => crate::i18n::tr_key("Use both: the right text, then the left"),
+            How::Base => crate::i18n::tr_key("Keep the base text and drop both sides' changes"),
             How::Manual => "",
         }
     }
@@ -408,19 +408,27 @@ impl MergeSession {
 
     pub fn nav_word(&self) -> &'static str {
         if self.conflicts.is_empty() {
-            "Change"
+            crate::i18n::tr_key("Change")
         } else {
-            "Conflict"
+            crate::i18n::tr_key("Conflict")
         }
     }
 
-    pub fn position_text(&self) -> String {
+    /// Where the walk stands: the current target's place in the list (from 1), if any, and how
+    /// many targets there are.
+    pub fn position(&self) -> (Option<usize>, usize) {
         let list = self.nav_list();
         let place = self
             .current
             .and_then(|c| list.iter().position(|&x| x == c))
-            .map_or_else(|| "\u{2013}".to_owned(), |k| (k + 1).to_string());
-        format!("{} {} / {}", self.nav_word(), place, list.len())
+            .map(|k| k + 1);
+        (place, list.len())
+    }
+
+    pub fn position_text(&self) -> String {
+        let (place, total) = self.position();
+        let place = place.map_or_else(|| "\u{2013}".to_owned(), |k| k.to_string());
+        format!("{} {} / {}", self.nav_word(), place, total)
     }
 
     pub fn can_go(&self, forward: bool) -> bool {

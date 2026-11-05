@@ -5,17 +5,18 @@
 use duet_core::table::nav::{FindResume, Found, Search, find, row_for_line};
 use gpui_kit::AnyElement;
 use gpui_kit::component::h_flex;
-use gpui_kit::component::input::Input;
 
 use super::*;
+use crate::i18n::{tr, tr_key, trf};
+use crate::ui::edit_menu::ld_input;
 use crate::ui::fonts::SMALL_SIZE;
 use crate::ui::icons;
 use crate::ui::style::{LdExt as _, ld_icon_button};
 
-const FIND_PLACEHOLDER: &str = "Find in every cell, both sides";
-const GOTO_PLACEHOLDER: &str = "Line in the file (the header is line 1)";
-const NO_LINE: &str = "Type a line number.";
-const STILL_SEARCHING: &str = "Still searching: press F3 to go on.";
+const FIND_PLACEHOLDER: &str = tr_key("Find in every cell, both sides");
+const GOTO_PLACEHOLDER: &str = tr_key("Line in the file (the header is line 1)");
+const NO_LINE: &str = tr_key("Type a line number.");
+const STILL_SEARCHING: &str = tr_key("Still searching: press F3 to go on.");
 
 /// A bar's field and its Enter subscription.
 pub(super) struct Bar {
@@ -39,7 +40,7 @@ impl TableView {
         cx: &mut Context<Self>,
         on_enter: impl Fn(&mut Self, bool, &mut Window, &mut Context<Self>) + 'static,
     ) -> Bar {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(placeholder)));
         let _subscription = cx.subscribe_in(
             &input,
             window,
@@ -94,6 +95,19 @@ impl TableView {
             window.focus(&bar.input.focus_handle(cx), cx);
         }
         cx.notify();
+    }
+
+    /// The language changed: the open bars' placeholders are said again.
+    pub(super) fn relabel_bars(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for (bar, key) in [
+            (&self.find, FIND_PLACEHOLDER),
+            (&self.goto, GOTO_PLACEHOLDER),
+        ] {
+            if let Some(bar) = bar {
+                bar.input
+                    .update(cx, |state, cx| state.set_placeholder(tr(key), window, cx));
+            }
+        }
     }
 
     pub(super) fn bar_open(&self) -> bool {
@@ -171,7 +185,7 @@ impl TableView {
                 self.select(row, Some(column), true, cx);
             }
             Some(Found::Paused(resume)) => {
-                self.notice = Some(STILL_SEARCHING.into());
+                self.notice = Some(tr(STILL_SEARCHING).into());
                 self.find_paused = Some(Paused {
                     text,
                     forward,
@@ -181,7 +195,7 @@ impl TableView {
                 cx.notify();
             }
             Some(Found::Nothing) | None => {
-                self.notice = Some(format!("Not found: {text}.").into());
+                self.notice = Some(trf("Not found: {}.", &[&text]).into());
                 cx.notify();
             }
         }
@@ -200,7 +214,7 @@ impl TableView {
         };
         let typed = bar.input.read(cx).value().trim().to_owned();
         if typed.is_empty() || !typed.bytes().all(|b| b.is_ascii_digit()) {
-            self.notice = Some(NO_LINE.into());
+            self.notice = Some(tr(NO_LINE).into());
             cx.notify();
             return;
         }
@@ -215,7 +229,7 @@ impl TableView {
             )
         });
         let Some(row) = row else {
-            self.notice = Some(format!("No row at line {typed}.").into());
+            self.notice = Some(trf("No row at line {}.", &[&typed]).into());
             cx.notify();
             return;
         };
@@ -274,19 +288,19 @@ impl TableView {
                     .id("table-find-input")
                     .test_support()
                     .w(px(260.))
-                    .child(Input::new(&bar.input).aria_label("Find"))
+                    .child(ld_input(&bar.input).aria_label(tr("Find")))
                     .into_any_element(),
-                ld_icon_button("table-find-prev", icons::PREV, "Previous (Shift+F3)", p)
+                ld_icon_button("table-find-prev", icons::PREV, tr("Previous (Shift+F3)"), p)
                     .ld_click(
                         true,
                         cx.listener(|this, _, _, cx| this.step_find(false, cx)),
                     )
                     .into_any_element(),
-                ld_icon_button("table-find-next", icons::NEXT, "Next (F3)", p)
+                ld_icon_button("table-find-next", icons::NEXT, tr("Next (F3)"), p)
                     .ld_click(true, cx.listener(|this, _, _, cx| this.step_find(true, cx)))
                     .into_any_element(),
                 div().flex_1().into_any_element(),
-                ld_icon_button("table-find-close", icons::CLOSE, "Close (Esc)", p)
+                ld_icon_button("table-find-close", icons::CLOSE, tr("Close (Esc)"), p)
                     .ld_click(
                         true,
                         cx.listener(|this, _, window, cx| this.close_bars(window, cx)),
@@ -307,10 +321,10 @@ impl TableView {
                     .id("table-goto-input")
                     .test_support()
                     .w(px(260.))
-                    .child(Input::new(&bar.input).aria_label("Go to line"))
+                    .child(ld_input(&bar.input).aria_label(tr("Go to line")))
                     .into_any_element(),
                 div().flex_1().into_any_element(),
-                ld_icon_button("table-goto-close", icons::CLOSE, "Close (Esc)", p)
+                ld_icon_button("table-goto-close", icons::CLOSE, tr("Close (Esc)"), p)
                     .ld_click(
                         true,
                         cx.listener(|this, _, window, cx| this.close_bars(window, cx)),

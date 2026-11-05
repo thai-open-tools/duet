@@ -8,7 +8,7 @@ use duet_app::hex::view::HexEvent;
 use duet_app::launch::{Launch, MergePaths};
 use duet_app::merge::view::{InputMode, LEFT, MergeView, RIGHT, Stage};
 use duet_app::palette::Palette;
-use duet_app::tabs::TabKey;
+use duet_app::tabs::{Mode, TabKey};
 use duet_app::text::view::TextEvent;
 use duet_app::workspace::{TabItem, Workspace};
 use gpui_kit::component::ThemeMode;
@@ -17,6 +17,11 @@ use gpui_kit::{
     AnyWindowHandle, App, AppContext, Bounds, Entity, Focusable, Point, Render, TestAppContext,
     Window, WindowBounds, WindowOptions, px, size,
 };
+
+/// Help's language follows the UI's, and English is the default under test.
+fn thai_ui() -> duet_app::i18n::LangScope {
+    duet_app::i18n::scoped(duet_app::i18n::Lang::Th)
+}
 
 fn open_test_window<V: Render>(
     cx: &mut TestAppContext,
@@ -401,6 +406,26 @@ async fn an_identical_pair_gets_an_ok_badge(cx: &mut TestAppContext) {
 fn with_data_dir(cx: &mut TestAppContext, dir: &std::path::Path) {
     let data_dir = dir.to_path_buf();
     cx.update(|cx| cx.set_global(duet_app::app::AppPaths { data_dir }));
+}
+
+#[gpui_kit::test]
+async fn compares_of_temp_files_stay_out_of_the_recent_list(cx: &mut TestAppContext) {
+    let data = tempfile::tempdir().unwrap();
+    with_data_dir(cx, data.path());
+    let (dir, l, r) = pair_of_dirs();
+    // The pair lives under the "temp folder", as git's files and `no file` do.
+    let root = dir.path().to_path_buf();
+    cx.update(|cx| cx.set_global(duet_app::app::TempRoot(root)));
+    let (handle, workspace) = open(cx, Launch::Folders { left: l, right: r });
+    cx.update_window(handle, |_, window, cx| window.press("ctrl-t", cx))
+        .unwrap();
+    let start = workspace.read_with(cx, |w, _| match w.tabs().active() {
+        Some(TabItem::Start(view)) => view.clone(),
+        _ => panic!("expected the start tab"),
+    });
+    cx.run_until_parked();
+    assert!(start.read_with(cx, |s, _| s.recent().is_empty()));
+    assert!(!data.path().join("recent.txt").exists());
 }
 
 #[gpui_kit::test]
@@ -870,6 +895,8 @@ fn the_offline_pill_hides_on_a_narrow_window(cx: &mut TestAppContext) {
     .unwrap();
     assert!(duet_app::workspace::header_pill_visible(px(1100.)));
     assert!(!duet_app::workspace::header_pill_visible(px(1099.)));
+    assert!(duet_app::workspace::header_modes_visible(px(800.)));
+    assert!(!duet_app::workspace::header_modes_visible(px(799.)));
 }
 
 #[gpui_kit::test]
@@ -3697,6 +3724,7 @@ fn label_of(
 
 #[gpui_kit::test]
 fn the_welcome_card_shows_until_dismissed_and_then_on_no_start_tab(cx: &mut TestAppContext) {
+    let _th = thai_ui();
     use duet_app::help::topics::HelpLang;
     let data = tempfile::tempdir().unwrap();
     with_data_dir(cx, data.path());
@@ -4046,4 +4074,360 @@ fn the_header_draws_the_app_icon(cx: &mut TestAppContext) {
         );
     })
     .unwrap();
+}
+
+fn start_view(
+    workspace: &Entity<Workspace>,
+    cx: &mut TestAppContext,
+) -> Entity<duet_app::start::StartView> {
+    workspace.read_with(cx, |w, _| match w.tabs().active() {
+        Some(TabItem::Start(view)) => view.clone(),
+        _ => panic!("expected the start tab"),
+    })
+}
+
+/// `--compare-to` with nothing stored: one Start tab, its left box already holding the path. The
+/// boxes are read straight after opening, with no extra draw: the real window gets none either.
+#[gpui_kit::test]
+fn compare_to_without_a_stored_left_fills_the_left_box(cx: &mut TestAppContext) {
+    let left = "C:\\ไทย folder\\a.txt";
+    let (_handle, workspace) = open(
+        cx,
+        Launch::StartWithLeft {
+            left: left.into(),
+            notice: None,
+        },
+    );
+    assert_eq!(kinds(&workspace, cx), ["start"]);
+    let start = start_view(&workspace, cx);
+    start.read_with(cx, |v, cx| {
+        assert_eq!(v.left_input().read(cx).value().as_ref(), left);
+        assert_eq!(v.right_input().read(cx).value().as_ref(), "");
+        assert_eq!(v.error(), None);
+    });
+}
+
+#[gpui_kit::test]
+fn a_vanished_stored_left_shows_its_name_in_the_first_frame(cx: &mut TestAppContext) {
+    let notice = "C:\\gone\\old.txt: no longer exists";
+    let (handle, workspace) = open(
+        cx,
+        Launch::StartWithLeft {
+            left: "C:\\now\\here.txt".into(),
+            notice: Some(notice.into()),
+        },
+    );
+    let start = start_view(&workspace, cx);
+    start.read_with(cx, |v, cx| {
+        assert!(v.error().is_some_and(|e| e.contains("C:\\gone\\old.txt")));
+        assert_eq!(
+            v.left_input().read(cx).value().as_ref(),
+            "C:\\now\\here.txt"
+        );
+    });
+    // No render_frame: this is the frame open_window itself painted.
+    cx.update_window(handle, |_, window, _| {
+        assert!(window.try_find("start-error").is_some());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+async fn a_dirty_merge_swapped_onto_an_open_set_swaps_back_says_so_in_thai(
+    cx: &mut TestAppContext,
+) {
+    let _th = duet_app::i18n::scoped(duet_app::i18n::Lang::Th);
+    let (_dir, paths) = conflict_set();
+    let swapped = MergePaths {
+        left: paths.right.clone(),
+        base: paths.base.clone(),
+        right: paths.left.clone(),
+        output: None,
+    };
+    let (handle, workspace) = open(cx, Launch::Merge(paths.clone()));
+    wait_merge_idle(cx, handle, &workspace).await;
+    let view = active_merge(&workspace, cx);
+    cx.update_window(handle, |_, window, cx| {
+        workspace.update(cx, |w, cx| {
+            w.open_launch(Launch::Merge(swapped), window, cx)
+        })
+    })
+    .unwrap();
+    wait_merge_idle(cx, handle, &workspace).await;
+    workspace.update(cx, |w, cx| {
+        w.tabs_mut_for_test().activate(0);
+        cx.notify();
+    });
+    choose_left(cx, handle);
+    assert!(workspace.read_with(cx, |w, cx| w.tab_dirty(0, cx)));
+    cx.update_window(handle, |_, window, cx| {
+        window.focus(&view.focus_handle(cx), cx);
+        window.press("f9", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(kinds(&workspace, cx), ["merge", "merge"]);
+    assert_eq!(
+        workspace.read_with(cx, |w, _| w.tabs().iter().next().unwrap().1.title()),
+        format!("{}: left.txt ↔ right.txt", duet_app::i18n::tr("Merge"))
+    );
+    view.read_with(cx, |v, _| {
+        assert_eq!(v.slot(LEFT).unwrap().name, "left.txt", "the swap went back");
+        let session = v.session().unwrap();
+        assert_eq!(session.left().name, "left.txt");
+        assert_eq!(
+            session.resolution(1).map(|r| r.how),
+            Some(duet_core::text::merge::session::How::Left),
+            "with the choice as it was"
+        );
+        assert!(v.is_dirty());
+        assert_eq!(
+            v.notice(),
+            Some(duet_app::i18n::tr(
+                "These files are already merged in another tab."
+            ))
+        );
+    });
+}
+
+#[gpui_kit::test]
+async fn a_dirty_merge_merged_again_onto_an_open_set_is_refused_says_so_in_thai(
+    cx: &mut TestAppContext,
+) {
+    // M-68: as a swap is, a Merge ▸ of other slots is refused before it drops the choices.
+    let (_dir, paths) = conflict_set();
+    let swapped = MergePaths {
+        left: paths.right.clone(),
+        base: paths.base.clone(),
+        right: paths.left.clone(),
+        output: None,
+    };
+    let (handle, workspace) = open(cx, Launch::Merge(paths.clone()));
+    wait_merge_idle(cx, handle, &workspace).await;
+    let view = active_merge(&workspace, cx);
+    cx.update_window(handle, |_, window, cx| {
+        workspace.update(cx, |w, cx| {
+            w.open_launch(Launch::Merge(swapped.clone()), window, cx)
+        })
+    })
+    .unwrap();
+    wait_merge_idle(cx, handle, &workspace).await;
+    workspace.update(cx, |w, cx| {
+        w.tabs_mut_for_test().activate(0);
+        cx.notify();
+    });
+    choose_left(cx, handle);
+    assert!(workspace.read_with(cx, |w, cx| w.tab_dirty(0, cx)));
+    // The slots take the other tab's files, then Merge ▸.
+    view.update(cx, |v, cx| {
+        v.open_slot_path(LEFT, swapped.left.clone().unwrap(), cx);
+        v.open_slot_path(RIGHT, swapped.right.clone().unwrap(), cx);
+    });
+    wait_merge_idle(cx, handle, &workspace).await;
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| v.run(false, window, cx))
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(
+        !cx.has_pending_prompt(),
+        "refused before asking to drop the choices"
+    );
+    assert_eq!(kinds(&workspace, cx), ["merge", "merge"]);
+    assert_eq!(
+        workspace.read_with(cx, |w, _| w.tabs().iter().next().unwrap().1.title()),
+        format!("{}: left.txt ↔ right.txt", duet_app::i18n::tr("Merge"))
+    );
+    view.read_with(cx, |v, _| {
+        let session = v.session().unwrap();
+        assert_eq!(session.left().name, "left.txt");
+        assert_eq!(
+            session.resolution(1).map(|r| r.how),
+            Some(duet_core::text::merge::session::How::Left),
+            "the choice stays"
+        );
+        assert_eq!(
+            v.notice(),
+            Some(duet_app::i18n::tr(
+                "These files are already merged in another tab."
+            ))
+        );
+    });
+}
+
+/// The binary-files card, and a recent entry of another kind, say what to open: two workbooks are
+/// not a table then.
+#[gpui_kit::test]
+async fn a_forced_kind_beats_a_workbook_pair(cx: &mut TestAppContext) {
+    use duet_core::table::xlsx::fixture::{SheetSpec, workbook};
+    let files = tempfile::tempdir().unwrap();
+    let (a, b) = (files.path().join("a.xlsx"), files.path().join("b.xlsx"));
+    let book = workbook(&[SheetSpec::text_rows("S", &[&["id"], &["1"]])]);
+    std::fs::write(&a, &book).unwrap();
+    std::fs::write(&b, &book).unwrap();
+
+    let (handle, workspace) = open(cx, Launch::Start);
+    let start = active_start(&workspace, cx);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("start-mode-hex", cx);
+    })
+    .unwrap();
+    let picked = a.clone();
+    cx.simulate_path_prompt_response(move |_| Some(vec![picked]));
+    cx.run_until_parked();
+    let (a_text, b_text) = (a.display().to_string(), b.display().to_string());
+    cx.update_window(handle, |_, window, cx| {
+        start.update(cx, |view, cx| {
+            view.set_paths(&a_text, &b_text, window, cx);
+            view.compare(cx);
+        })
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(kinds(&workspace, cx), ["start", "hex"]);
+}
+
+#[gpui_kit::test]
+async fn a_recent_entry_of_another_kind_keeps_its_kind_on_a_workbook_pair(cx: &mut TestAppContext) {
+    use duet_app::recent::{self, Recent, RecentKind};
+    use duet_core::table::xlsx::fixture::{SheetSpec, workbook};
+    for (kind, want) in [(RecentKind::Hex, "hex"), (RecentKind::Picture, "picture")] {
+        let data = tempfile::tempdir().unwrap();
+        with_data_dir(cx, data.path());
+        let files = tempfile::tempdir().unwrap();
+        let (a, b) = (files.path().join("a.xlsx"), files.path().join("b.xlsx"));
+        let book = workbook(&[SheetSpec::text_rows("S", &[&["id"], &["1"]])]);
+        std::fs::write(&a, &book).unwrap();
+        std::fs::write(&b, &book).unwrap();
+        recent::record(
+            &data.path().join("recent.txt"),
+            Recent {
+                kind,
+                left: a,
+                right: b,
+                base: None,
+            },
+        )
+        .unwrap();
+        let (_handle, workspace) = open(cx, Launch::Start);
+        cx.run_until_parked();
+        let start = workspace.read_with(cx, |w, _| match w.tabs().active() {
+            Some(TabItem::Start(view)) => view.clone(),
+            _ => panic!("expected the start tab"),
+        });
+        start.update(cx, |s, cx| s.open_recent(0, cx));
+        cx.run_until_parked();
+        assert_eq!(kinds(&workspace, cx), ["start", want]);
+    }
+}
+
+// ---- The mode bar in the header ----
+
+fn click_mode(cx: &mut TestAppContext, handle: AnyWindowHandle, mode: Mode) {
+    let index = Mode::ALL.iter().position(|m| *m == mode).unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click(("header-mode", index), cx);
+    })
+    .unwrap();
+}
+
+fn active_mode(workspace: &Entity<Workspace>, cx: &mut TestAppContext) -> Option<Mode> {
+    workspace.read_with(cx, |w, _| w.tabs().active_mode())
+}
+
+#[gpui_kit::test]
+fn the_mode_bar_goes_to_the_tab_of_its_kind_used_last(cx: &mut TestAppContext) {
+    let (dir, l, r) = pair_of_dirs();
+    let csv = |name: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, "a\n1\n").unwrap();
+        path
+    };
+    let (a, b, c, d) = (csv("a.csv"), csv("b.csv"), csv("c.csv"), csv("d.csv"));
+    let (handle, workspace) = open(cx, Launch::Folders { left: l, right: r });
+    for (left, right) in [(a, b), (c, d)] {
+        cx.update_window(handle, |_, window, cx| {
+            workspace.update(cx, |w, cx| {
+                w.open_launch(Launch::Table { left, right }, window, cx)
+            });
+        })
+        .unwrap();
+    }
+    workspace.update(cx, |w, _| {
+        w.tabs_mut_for_test().activate(1);
+        w.tabs_mut_for_test().activate(0);
+    });
+    assert_eq!(active_mode(&workspace, cx), Some(Mode::Folders));
+
+    click_mode(cx, handle, Mode::Table);
+    assert_eq!(
+        active_index(&workspace, cx),
+        Some(1),
+        "the table used last, not the last table in the strip"
+    );
+    assert_eq!(active_mode(&workspace, cx), Some(Mode::Table));
+
+    click_mode(cx, handle, Mode::Folders);
+    assert_eq!(active_index(&workspace, cx), Some(0));
+    assert_eq!(
+        kinds(&workspace, cx),
+        ["folder", "table", "table"],
+        "going to a tab opens none"
+    );
+}
+
+#[gpui_kit::test]
+fn the_mode_bar_starts_a_compare_of_a_kind_with_no_tab(cx: &mut TestAppContext) {
+    let (_dir, l, r) = pair_of_dirs();
+    let (handle, workspace) = open(cx, Launch::Folders { left: l, right: r });
+
+    click_mode(cx, handle, Mode::Table);
+    cx.run_until_parked();
+    assert_eq!(kinds(&workspace, cx), ["folder", "start"]);
+    assert_eq!(active_mode(&workspace, cx), Some(Mode::Start));
+    assert!(cx.did_prompt_for_paths(), "the picker of its Start tile");
+    cx.simulate_path_prompt_response(|_| None);
+    cx.run_until_parked();
+
+    click_mode(cx, handle, Mode::Hex);
+    cx.run_until_parked();
+    assert_eq!(
+        kinds(&workspace, cx),
+        ["folder", "start"],
+        "another kind uses the same Start tab"
+    );
+    assert!(cx.did_prompt_for_paths());
+    cx.simulate_path_prompt_response(|_| None);
+    cx.run_until_parked();
+
+    click_mode(cx, handle, Mode::Merge);
+    cx.run_until_parked();
+    assert_eq!(
+        kinds(&workspace, cx),
+        ["folder", "start", "merge"],
+        "as its tile, a merge opens empty"
+    );
+    assert!(!cx.did_prompt_for_paths(), "and asks for nothing");
+
+    click_mode(cx, handle, Mode::Start);
+    cx.run_until_parked();
+    assert_eq!(active_mode(&workspace, cx), Some(Mode::Start));
+    assert!(!cx.did_prompt_for_paths(), "Start is only a place to go");
+}
+
+#[gpui_kit::test]
+fn the_help_tab_has_no_mode_and_the_bar_leaves_it(cx: &mut TestAppContext) {
+    let (handle, workspace) = open(cx, Launch::Start);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("header-help", cx);
+    })
+    .unwrap();
+    assert_eq!(kinds(&workspace, cx), ["start", "help"]);
+    assert_eq!(active_mode(&workspace, cx), None);
+    click_mode(cx, handle, Mode::Start);
+    assert_eq!(active_mode(&workspace, cx), Some(Mode::Start));
+    assert_eq!(kinds(&workspace, cx), ["start", "help"]);
 }

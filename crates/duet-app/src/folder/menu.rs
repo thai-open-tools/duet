@@ -15,10 +15,11 @@ use crate::folder::view::{
     CopyToLeft, CopyToRight, DeleteBoth, DeleteLeft, DeleteRight, FolderEvent, FolderView, OpenRow,
     TouchLeft, TouchRight,
 };
+use crate::i18n::{tr, tr_key};
 use crate::ui::menu::{MenuEntry, fill, fill_or_hand_back, tidy};
 
 /// Shown while Enter or a double-click works out whether a pair opens as text or hex.
-const CHECKING_KIND: &str = "Checking the file type…";
+const CHECKING_KIND: &str = tr_key("Checking the file type…");
 
 actions!(
     folder,
@@ -62,57 +63,64 @@ pub fn row_menu(view: &FolderView) -> Vec<MenuEntry> {
     let mut out = Vec::new();
     if file {
         out.extend([
-            MenuEntry::action("Open compare", OpenRow).enabled(on_a_side),
-            MenuEntry::action("Open as text", OpenAsText).enabled(on_a_side),
-            MenuEntry::action("Open as hex", OpenAsHex).enabled(on_both),
-            MenuEntry::action("Open as table", OpenAsTable).enabled(on_both),
-            MenuEntry::action("Open as picture", OpenAsPicture).enabled(on_both),
+            MenuEntry::action(tr("Open compare"), OpenRow).enabled(on_a_side),
+            MenuEntry::action(tr("Open as text"), OpenAsText).enabled(on_a_side),
+            MenuEntry::action(tr("Open as hex"), OpenAsHex).enabled(on_both),
+            MenuEntry::action(tr("Open as table"), OpenAsTable).enabled(on_both),
+            MenuEntry::action(tr("Open as picture"), OpenAsPicture).enabled(on_both),
         ]);
     }
     if folder {
         let label = if model.is_expanded(picked[0]) {
-            "Collapse folder"
+            tr("Collapse folder")
         } else {
-            "Expand folder"
+            tr("Expand folder")
         };
         out.push(MenuEntry::action(label, ToggleFolder));
     }
     out.extend([
         MenuEntry::Separator,
-        MenuEntry::action("Copy to right", CopyToRight).enabled(idle && any_left),
-        MenuEntry::action("Copy to left", CopyToLeft).enabled(idle && any_right),
-        MenuEntry::action("Sync selected…", SyncSelected).enabled(idle && (any_left || any_right)),
+        MenuEntry::action(tr("Copy to right"), CopyToRight).enabled(idle && any_left),
+        MenuEntry::action(tr("Copy to left"), CopyToLeft).enabled(idle && any_right),
+        MenuEntry::action(tr("Sync selected…"), SyncSelected)
+            .enabled(idle && (any_left || any_right)),
         MenuEntry::Separator,
-        MenuEntry::action("Delete left (to Recycle Bin)…", DeleteLeft).enabled(idle && any_left),
-        MenuEntry::action("Delete right (to Recycle Bin)…", DeleteRight).enabled(idle && any_right),
-        MenuEntry::action("Delete both (to Recycle Bin)…", DeleteBoth)
+        MenuEntry::action(tr("Delete left (to Recycle Bin)…"), DeleteLeft)
+            .enabled(idle && any_left),
+        MenuEntry::action(tr("Delete right (to Recycle Bin)…"), DeleteRight)
+            .enabled(idle && any_right),
+        MenuEntry::action(tr("Delete both (to Recycle Bin)…"), DeleteBoth)
             .enabled(idle && any_left && any_right),
         MenuEntry::Separator,
-        MenuEntry::action("Set right modified time = left", TouchRight).enabled(idle && any_both),
-        MenuEntry::action("Set left modified time = right", TouchLeft).enabled(idle && any_both),
+        MenuEntry::action(tr("Set right modified time = left"), TouchRight)
+            .enabled(idle && any_both),
+        MenuEntry::action(tr("Set left modified time = right"), TouchLeft)
+            .enabled(idle && any_both),
         MenuEntry::Separator,
-        MenuEntry::action("Show left in Explorer", RevealLeft).enabled(one && first.left.is_some()),
-        MenuEntry::action("Show right in Explorer", RevealRight)
+        MenuEntry::action(tr("Show left in Explorer"), RevealLeft)
+            .enabled(one && first.left.is_some()),
+        MenuEntry::action(tr("Show right in Explorer"), RevealRight)
             .enabled(one && first.right.is_some()),
     ]);
     if file {
         out.extend([
-            MenuEntry::action("Open left with default app", OpenLeftExternally)
+            MenuEntry::action(tr("Open left with default app"), OpenLeftExternally)
                 .enabled(first.left.is_some()),
-            MenuEntry::action("Open right with default app", OpenRightExternally)
+            MenuEntry::action(tr("Open right with default app"), OpenRightExternally)
                 .enabled(first.right.is_some()),
         ]);
     }
     out.extend([
-        MenuEntry::action("Copy path", CopyPaths),
+        MenuEntry::action(tr("Copy path"), CopyPaths),
         MenuEntry::Separator,
     ]);
     if folder {
         out.push(
-            MenuEntry::action("Set this folder as base", SetAsBase).enabled(idle && is_base(first)),
+            MenuEntry::action(tr("Set this folder as base"), SetAsBase)
+                .enabled(idle && is_base(first)),
         );
     }
-    out.push(MenuEntry::action("Exclude this item", ExcludeItem));
+    out.push(MenuEntry::action(tr("Exclude this item"), ExcludeItem));
     tidy(out)
 }
 
@@ -320,7 +328,7 @@ impl FolderView {
     /// check), or another row selected by then.
     pub(super) fn open_detected(&mut self, left: PathBuf, right: PathBuf, cx: &mut Context<Self>) {
         let (generation, _) = self.detect.start();
-        self.notice = Some(CHECKING_KIND.into());
+        self.notice = Some(tr(CHECKING_KIND).into());
         cx.notify();
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
@@ -355,7 +363,7 @@ impl FolderView {
     /// Forgets the running kind check, if any, and its notice.
     pub(super) fn drop_detect(&mut self, cx: &mut Context<Self>) {
         self.detect.cancel();
-        if self.notice.as_deref() == Some(CHECKING_KIND) {
+        if self.notice.as_deref() == Some(tr(CHECKING_KIND)) {
             self.notice = None;
             cx.notify();
         }

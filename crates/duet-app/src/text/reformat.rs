@@ -7,6 +7,7 @@ use std::ops::Range;
 use duet_core::text::format::{ReformatKind, reformat};
 use gpui_kit::{Context, SharedString};
 
+use crate::i18n::{tr, trf};
 use crate::text::editing::WAIT_NOTICE;
 use crate::text::replace::{PairStamp, REFORMAT_STOPPED, side_word};
 use crate::text::view::TextView;
@@ -43,14 +44,14 @@ fn changed_span(old: &str, new: &str) -> Option<(Range<usize>, String)> {
 
 fn how(kind: ReformatKind) -> &'static str {
     match kind {
-        ReformatKind::Json => "re-indented JSON",
-        ReformatKind::Xml => "re-indented XML",
-        ReformatKind::Trimmed => "trimmed trailing spaces",
+        ReformatKind::Json => tr("re-indented JSON"),
+        ReformatKind::Xml => tr("re-indented XML"),
+        ReformatKind::Trimmed => tr("trimmed trailing spaces"),
     }
 }
 
 fn side_name(left: bool) -> &'static str {
-    if left { "Left" } else { "Right" }
+    tr(if left { "Left" } else { "Right" })
 }
 
 impl TextView {
@@ -73,7 +74,7 @@ impl TextView {
         if sides.is_empty() {
             let reason = skipped.into_iter().next().map(|(_, reason)| reason);
             self.tell(
-                reason.unwrap_or_else(|| "There is nothing to reformat.".into()),
+                reason.unwrap_or_else(|| tr("There is nothing to reformat.").into()),
                 cx,
             );
             return;
@@ -118,11 +119,11 @@ impl TextView {
     ) {
         self.reformatting = None;
         if self.pair_stamp() != Some(stamp) {
-            self.tell(REFORMAT_STOPPED, cx);
+            self.tell(tr(REFORMAT_STOPPED), cx);
             return;
         }
         if self.job.is_running() {
-            self.tell(WAIT_NOTICE, cx);
+            self.tell(tr(WAIT_NOTICE), cx);
             return;
         }
         let kinds: Vec<(bool, ReformatKind)> = plans
@@ -142,23 +143,23 @@ impl TextView {
         // A side that could not take its edit is named; the other one's stays (M9).
         let mut said = match failed {
             None if parts.is_empty() => {
-                "Nothing to reformat: both sides are already tidy.".to_owned()
+                tr("Nothing to reformat: both sides are already tidy.").to_owned()
             }
             None => format!("{}.", parts.join(" · ")),
-            Some(side) if parts.is_empty() => format!(
+            Some(side) if parts.is_empty() => trf(
                 "Nothing was reformatted: the {} side could not be changed.",
-                side_word(side)
+                &[&side_word(side)],
             ),
-            Some(side) => format!(
+            Some(side) => trf(
                 "{}. The {} side could not be changed.",
-                parts.join(" · "),
-                side_word(side)
+                &[&parts.join(" · "), &side_word(side)],
             ),
         };
         for (left, reason) in skipped {
-            said.push_str(&format!(
-                " The {} side was skipped: {reason}",
-                side_word(left)
+            said.push(' ');
+            said.push_str(&trf(
+                "The {} side was skipped: {}",
+                &[&side_word(left), &reason],
             ));
         }
         self.tell(said, cx);

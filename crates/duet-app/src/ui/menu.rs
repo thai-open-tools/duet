@@ -3,8 +3,15 @@
 
 use std::rc::Rc;
 
+use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::{Action, App, FocusHandle, SharedString, Window};
+use gpui_kit::{
+    Action, App, Div, ElementId, FocusHandle, InteractiveElement as _, IntoElement,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
+    TestSupportExt as _, Window, div, transparent_white,
+};
+
+use crate::i18n::{self, Lang};
 
 type Run = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -62,6 +69,21 @@ impl MenuEntry {
     }
 }
 
+/// The language items a report menu ends with: a separator, then each language under its own
+/// name (it reads the same in both), the one in use checked.
+pub fn language_items(
+    current: crate::i18n::Lang,
+    thai: impl Action,
+    english: impl Action,
+) -> Vec<MenuEntry> {
+    use crate::i18n::Lang;
+    vec![
+        MenuEntry::Separator,
+        MenuEntry::action("ไทย", thai).checked(current == Lang::Th),
+        MenuEntry::action("English", english).checked(current == Lang::En),
+    ]
+}
+
 /// No separator at either end or twice in a row; a menu of separators only is empty.
 pub fn tidy(entries: Vec<MenuEntry>) -> Vec<MenuEntry> {
     let mut out: Vec<MenuEntry> = Vec::with_capacity(entries.len());
@@ -107,15 +129,76 @@ pub fn outline(entries: &[MenuEntry]) -> Vec<String> {
         .collect()
 }
 
+/// `el` on one line whatever its box's width. gpui can wrap a Thai label inside a box of exactly
+/// the label's width, which leaves its last letters alone on a second line.
+pub fn one_line(el: impl IntoElement) -> Div {
+    div().whitespace_nowrap().child(el)
+}
+
+/// A menu row's label, named for a screen reader as the kit's own rows are.
+fn row_label(label: SharedString) -> impl IntoElement {
+    one_line(label.clone())
+        .id(ElementId::Name(label.clone()))
+        .test_support()
+        .aria_label(label)
+}
+
+/// A menu row with a label. In Thai it is the kit's element row, as its plain row has no way to
+/// keep the label on one line; English is the kit's plain row, which never wraps.
+pub fn row(label: impl Into<SharedString>) -> PopupMenuItem {
+    let label = label.into();
+    if i18n::current() == Lang::Th {
+        PopupMenuItem::element(move |_, _| row_label(label.clone()))
+    } else {
+        PopupMenuItem::new(label)
+    }
+}
+
+/// `row` for an action, with the shortcut it shows, found as the kit finds it.
+fn thai_action_row(
+    label: SharedString,
+    action: Box<dyn Action>,
+    focus: Option<FocusHandle>,
+) -> PopupMenuItem {
+    let hint = action.boxed_clone();
+    PopupMenuItem::element(move |window, _| {
+        let key = focus
+            .as_ref()
+            .and_then(|focus| Kbd::binding_for_action_in(hint.as_ref(), focus, window))
+            .or_else(|| Kbd::global_binding_for_action(hint.as_ref(), window))
+            .map(|key| key.p_0().flex_nowrap().border_0().bg(transparent_white()));
+        div()
+            .flex()
+            .flex_row()
+            .flex_1()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .child(row_label(label.clone()))
+            .children(key)
+    })
+    .action(action)
+}
+
 /// Fills a popup. Action items go to `focus` (the view's handle), which is also where the
 /// popup looks up the shortcut it shows.
 pub fn fill(mut menu: PopupMenu, entries: Vec<MenuEntry>, focus: Option<FocusHandle>) -> PopupMenu {
-    if let Some(focus) = focus {
+    if let Some(focus) = focus.clone() {
         menu = menu.action_context(focus);
     }
     for entry in tidy(entries) {
         menu = match entry {
             MenuEntry::Separator => menu.separator(),
+            MenuEntry::Action {
+                label,
+                action,
+                enabled,
+                checked,
+            } if i18n::current() == Lang::Th => menu.item(
+                thai_action_row(label, action, focus.clone())
+                    .disabled(!enabled)
+                    .checked(checked == Some(true)),
+            ),
             MenuEntry::Action {
                 label,
                 action,
@@ -130,7 +213,7 @@ pub fn fill(mut menu: PopupMenu, entries: Vec<MenuEntry>, focus: Option<FocusHan
                 run,
                 enabled,
             } => menu.item(
-                PopupMenuItem::new(label)
+                row(label)
                     .disabled(!enabled)
                     .on_click(move |_, window, cx| run(window, cx)),
             ),

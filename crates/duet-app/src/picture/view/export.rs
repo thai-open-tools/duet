@@ -5,6 +5,7 @@
 use duet_core::picture::export::{encode_png, export_name};
 
 use super::*;
+use crate::i18n::trf;
 use crate::paths::home_dir;
 
 impl PictureView {
@@ -40,8 +41,8 @@ impl PictureView {
             let _ = this.update(cx, |view, cx| {
                 view.notice = Some(
                     match result {
-                        Ok(()) => format!("Exported: {}.", path.display()),
-                        Err(err) => format!("Can't export: {err}."),
+                        Ok(()) => trf("Exported: {}.", &[&path.display()]),
+                        Err(err) => trf("Can't export: {}.", &[&err]),
                     }
                     .into(),
                 );

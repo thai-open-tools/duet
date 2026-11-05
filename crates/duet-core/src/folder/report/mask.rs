@@ -14,6 +14,8 @@ use std::sync::OnceLock;
 
 use regex::{Captures, Regex};
 
+use crate::i18n::trf;
+
 /// `rptHide`'s fingerprint: the top 16 bits of FNV-1a over the value's UTF-16 code units.
 pub fn fingerprint(value: &str) -> String {
     let mut hash: u32 = 0x811c_9dc5;
@@ -26,7 +28,7 @@ pub fn fingerprint(value: &str) -> String {
 
 /// "•••••• (hidden #xxxx)".
 pub fn hidden(value: &str) -> String {
-    format!("•••••• (hidden #{})", fingerprint(value))
+    trf("•••••• (hidden #{})", &[&fingerprint(value)])
 }
 
 fn regex(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {

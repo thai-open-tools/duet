@@ -155,7 +155,7 @@ impl MergeText {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ReadError {
     #[error("the file is larger than {0} MB.")]
     FileTooLarge(u64),

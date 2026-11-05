@@ -13,6 +13,8 @@ use crate::text::model::Visible;
 /// Matches past this many are dropped; the bar then says "100,000+".
 pub const MAX_HITS: usize = 100_000;
 
+use crate::i18n::tr_key;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FindScope {
     #[default]
@@ -24,9 +26,9 @@ pub enum FindScope {
 impl FindScope {
     pub fn label(self) -> &'static str {
         match self {
-            FindScope::Both => "Both",
-            FindScope::Left => "Left",
-            FindScope::Right => "Right",
+            FindScope::Both => tr_key("Both"),
+            FindScope::Left => tr_key("Left"),
+            FindScope::Right => tr_key("Right"),
         }
     }
 

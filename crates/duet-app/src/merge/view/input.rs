@@ -2,32 +2,55 @@
 //! output box, drops, and what each slot says about itself.
 
 use gpui_kit::component::h_flex;
-use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::{
-    AnyElement, ClickEvent, Div, ExternalPaths, FontWeight, HighlightStyle, Hsla,
-    PathPromptOptions, Stateful, StyledText, relative,
+    AnyElement, ClickEvent, Div, ExternalPaths, FontWeight, PathPromptOptions, Stateful, relative,
 };
 
 use super::*;
 use crate::format::{encoding_label, human_size};
+use crate::i18n::tr_str;
 use crate::pathbar::dropped_files_up_to;
 use crate::start::clean_path;
 use crate::status::{StatusPart, Tone};
+use crate::ui::edit_menu::{ld_input, ld_textarea};
 use crate::ui::fonts::{CODE_SIZE, Fonts, SMALL_SIZE};
 use crate::ui::icons;
+use crate::ui::prose::{ProseExt as _, rich_prose};
 use crate::ui::style::{
     LdExt as _, ld_button, ld_icon_button, ld_label_icon_button, ld_segment, ld_segmented,
-    ld_separator, ld_small_icon_button, ld_tip, status_bar, status_line_box, status_parts_row,
+    ld_separator, ld_small_icon_button, ld_tip, status_bar, status_line_box, status_notice,
+    status_parts_row,
 };
 
 /// A file bigger than this cannot be copied into a paste field: a field that size would freeze
 /// the window (PF10).
 const EDIT_MAX_BYTES: usize = 2 * 1024 * 1024;
 const EDIT_MAX_LINES: u32 = 50_000;
-const TOO_LARGE: &str = "This file is too large to edit here. Use files mode.";
+const TOO_LARGE: &str = tr_key("This file is too large to edit here. Use files mode.");
 const PASTE_STATUS: &str =
-    "Paste mode: type or paste the text of all three sides, then press Merge.";
-const CLEAR_ALL: &str = "Clear all three slots and the merge result you have not saved?";
+    tr_key("Paste mode: type or paste the text of all three sides, then press Merge.");
+const CLEAR_ALL: &str = tr_key("Clear all three slots and the merge result you have not saved?");
+const CLEAR_ANSWERS: [&str; 2] = [tr_key("Cancel"), tr_key("Clear")];
+const OUTPUT_PLACEHOLDER: &str =
+    tr_key("(optional) output file: leave empty to choose when saving");
+/// The first character of the name of a slot's typed text: a file name cannot hold it, so a file
+/// named like a label is never taken for one. The rest is a table key, said in the language in
+/// force each time it is drawn.
+const TYPED_MARK: char = '\u{1}';
+const TYPED_NAMES: [&str; 3] = [
+    tr_key("left text"),
+    tr_key("base text"),
+    tr_key("right text"),
+];
+const EMPTY_NAME: &str = tr_key("(empty)");
+
+/// A text's name as drawn: a file's own name, or the label of typed text in the current language.
+pub(super) fn shown_name(name: &str) -> String {
+    match name.strip_prefix(TYPED_MARK) {
+        Some(key) => tr_str(key).into_owned(),
+        None => name.to_owned(),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InputMode {
@@ -68,9 +91,9 @@ const SIDES: [Side; 3] = [
         open: "merge-open-left",
         clear: "merge-clear-left",
         paste: "merge-paste-left",
-        title: "Left",
-        note: "(ours)",
-        placeholder: "Type or paste the left (ours) text here",
+        title: tr_key("Left"),
+        note: tr_key("(ours)"),
+        placeholder: tr_key("Type or paste the left (ours) text here"),
     },
     Side {
         slot: "merge-slot-base",
@@ -79,9 +102,9 @@ const SIDES: [Side; 3] = [
         open: "merge-open-base",
         clear: "merge-clear-base",
         paste: "merge-paste-base",
-        title: "Base",
-        note: "(common original)",
-        placeholder: "Type or paste the common original (base) text here",
+        title: tr_key("Base"),
+        note: tr_key("(common original)"),
+        placeholder: tr_key("Type or paste the common original (base) text here"),
     },
     Side {
         slot: "merge-slot-right",
@@ -90,9 +113,9 @@ const SIDES: [Side; 3] = [
         open: "merge-open-right",
         clear: "merge-clear-right",
         paste: "merge-paste-right",
-        title: "Right",
-        note: "(theirs)",
-        placeholder: "Type or paste the right (theirs) text here",
+        title: tr_key("Right"),
+        note: tr_key("(theirs)"),
+        placeholder: tr_key("Type or paste the right (theirs) text here"),
     },
 ];
 
@@ -100,7 +123,7 @@ const SIDES: [Side; 3] = [
 pub(super) fn eol_label(text: &MergeText) -> String {
     let label = text.format.eol.label();
     if text.format.mixed {
-        format!("{label} (mixed)")
+        trf("{} (mixed)", &[&label])
     } else {
         label.to_owned()
     }
@@ -124,27 +147,6 @@ fn field_text(text: &MergeText) -> String {
     out
 }
 
-/// Text with parts in a colour and bold, as one wrapping run.
-fn rich(parts: &[(&str, Option<Hsla>)]) -> StyledText {
-    let mut text = String::new();
-    let mut marks = Vec::new();
-    for (piece, color) in parts {
-        let start = text.len();
-        text.push_str(piece);
-        if let Some(color) = color {
-            marks.push((
-                start..text.len(),
-                HighlightStyle {
-                    color: Some(*color),
-                    font_weight: Some(FontWeight::BOLD),
-                    ..Default::default()
-                },
-            ));
-        }
-    }
-    StyledText::new(text).with_highlights(marks)
-}
-
 impl MergeView {
     /// The paste fields and the output box, with what their events do.
     pub(super) fn make_inputs(
@@ -159,7 +161,7 @@ impl MergeView {
         let pastes = [LEFT, BASE, RIGHT].map(|slot| {
             let field = cx.new(|cx| {
                 TextareaState::new(window, cx)
-                    .placeholder(SIDES[slot].placeholder)
+                    .placeholder(tr(SIDES[slot].placeholder))
                     .soft_wrap(false)
             });
             subscriptions.push(cx.subscribe_in(
@@ -175,10 +177,7 @@ impl MergeView {
             ));
             field
         });
-        let output = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("(optional) output file: leave empty to choose when saving")
-        });
+        let output = cx.new(|cx| InputState::new(window, cx).placeholder(tr(OUTPUT_PLACEHOLDER)));
         subscriptions.push(cx.subscribe_in(
             &output,
             window,
@@ -192,6 +191,18 @@ impl MergeView {
             },
         ));
         (pastes, output, subscriptions)
+    }
+
+    /// The placeholders of the paste fields and the output box, in the current language.
+    pub(super) fn relabel_inputs(&self, window: &mut Window, cx: &mut Context<Self>) {
+        for (field, side) in self.pastes.iter().zip(&SIDES) {
+            field.update(cx, |field, cx| {
+                field.set_placeholder(tr(side.placeholder), window, cx)
+            });
+        }
+        self.output_input.update(cx, |input, cx| {
+            input.set_placeholder(tr(OUTPUT_PLACEHOLDER), window, cx)
+        });
     }
 
     pub fn mode(&self) -> InputMode {
@@ -209,7 +220,7 @@ impl MergeView {
                 !self.edited[slot] && self.slots[slot].as_deref().is_some_and(too_large)
             });
             if big {
-                self.notice = Some(TOO_LARGE.into());
+                self.notice = Some(tr(TOO_LARGE).into());
                 cx.notify();
                 return;
             }
@@ -254,7 +265,7 @@ impl MergeView {
         if self.loading(slot) {
             return SlotText {
                 name: self.names[slot].to_string(),
-                meta: "Reading…".to_owned(),
+                meta: tr("Reading…").to_owned(),
                 ..blank
             };
         }
@@ -270,16 +281,15 @@ impl MergeView {
         if self.edited[slot] {
             let (name, meta) = match file {
                 Some(file) => (
-                    format!("{} (edited)", file.name),
-                    format!(
+                    trf("{} (edited)", &[&file.name]),
+                    trf(
                         "Uses the text in the box below · keeps {} · {}",
-                        encoding_label(&file.encoding),
-                        eol_label(file)
+                        &[&encoding_label(&file.encoding), &eol_label(file)],
                     ),
                 ),
                 None => (
-                    "Typed or pasted text".to_owned(),
-                    "Uses the text in the box below".to_owned(),
+                    tr("Typed or pasted text").to_owned(),
+                    tr("Uses the text in the box below").to_owned(),
                 ),
             };
             return SlotText {
@@ -300,10 +310,12 @@ impl MergeView {
                     eol_label(file)
                 );
                 if file.line_count() > 0 && !file.format.final_newline {
-                    meta.push_str(" · no newline at the end");
+                    meta.push_str(" · ");
+                    meta.push_str(tr("no newline at the end"));
                 }
                 if file.lossy {
-                    meta.push_str(" · some bytes did not decode");
+                    meta.push_str(" · ");
+                    meta.push_str(tr("some bytes did not decode"));
                 }
                 SlotText {
                     name: file.name.clone(),
@@ -313,8 +325,8 @@ impl MergeView {
                 }
             }
             None => SlotText {
-                name: "No file chosen".to_owned(),
-                meta: "Press “Open…” or drop a file here".to_owned(),
+                name: tr("No file chosen").to_owned(),
+                meta: tr("Press “Open…” or drop a file here").to_owned(),
                 ..blank
             },
         }
@@ -356,9 +368,9 @@ impl MergeView {
         }
         let answer = window.prompt(
             PromptLevel::Warning,
-            CLEAR_ALL,
+            tr(CLEAR_ALL),
             None,
-            &["Cancel", "Clear"],
+            &answers(&CLEAR_ANSWERS),
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -437,10 +449,10 @@ impl MergeView {
             return self.merge_status_parts();
         }
         let text = match self.mode {
-            InputMode::Paste => PASTE_STATUS.to_owned(),
+            InputMode::Paste => tr(PASTE_STATUS).to_owned(),
             InputMode::Files => {
                 let chosen = (LEFT..=RIGHT).filter(|&slot| self.filled(slot)).count();
-                format!("{chosen} of 3 files chosen")
+                trf("{} of 3 files chosen", &[&chosen])
             }
         };
         vec![StatusPart::new(text, Tone::Muted)]
@@ -471,11 +483,11 @@ impl MergeView {
                 let text = typed(self, cx);
                 texts.push(Arc::new(Self::typed_text(slot, text)));
             } else {
-                missing.push(side_name);
+                missing.push(tr(side_name));
             }
         }
         if !missing.is_empty() {
-            self.notice = Some(format!("Not chosen yet: {}.", missing.join(", ")).into());
+            self.notice = Some(trf("Not chosen yet: {}.", &[&missing.join(", ")]).into());
             cx.notify();
             return None;
         }
@@ -485,11 +497,12 @@ impl MergeView {
 
     /// Typed text: UTF-8 without a BOM, named after its slot ("(empty)" when it has none).
     fn typed_text(slot: usize, text: String) -> MergeText {
-        let name = if text.is_empty() {
-            "(empty)".to_owned()
+        let key = if text.is_empty() {
+            EMPTY_NAME
         } else {
-            format!("{} text", SLOT_NAMES[slot])
+            TYPED_NAMES[slot]
         };
+        let name = format!("{TYPED_MARK}{key}");
         let mut typed = MergeText::typed(text);
         typed.name = name;
         typed
@@ -502,7 +515,7 @@ impl MergeView {
         if let (InputMode::Paste, Some(file)) = (self.mode, &self.slots[slot]) {
             if too_large(file) {
                 self.mode = InputMode::Files;
-                self.notice = Some(TOO_LARGE.into());
+                self.notice = Some(tr(TOO_LARGE).into());
             } else {
                 text = field_text(file);
             }
@@ -643,15 +656,15 @@ impl MergeView {
         let segments = [
             mode_segment(
                 "merge-mode-files",
-                "Files",
-                "Open files or drop them here",
+                tr("Files"),
+                tr("Open files or drop them here"),
                 InputMode::Files,
                 false,
             ),
             mode_segment(
                 "merge-mode-paste",
-                "Paste text",
-                "Type or paste the text of all three sides",
+                tr("Paste text"),
+                tr("Type or paste the text of all three sides"),
                 InputMode::Paste,
                 true,
             ),
@@ -670,7 +683,7 @@ impl MergeView {
             .border_color(p.line)
             .child(ld_segmented("merge-mode", segments, p))
             .child(ld_separator(p))
-            .child(div().text_color(p.muted).child("Output:"))
+            .child(div().text_color(p.muted).child(tr("Output:")))
             .child(
                 div()
                     .id("merge-output")
@@ -680,27 +693,28 @@ impl MergeView {
                     .max_w(px(460.))
                     .font(fonts.code.clone())
                     .text_size(px(CODE_SIZE))
-                    .child(Input::new(&self.output_input).aria_label("Output file")),
+                    .child(ld_input(&self.output_input).aria_label(tr("Output file"))),
             )
             .child(div().flex_1())
             .child(
-                ld_icon_button("merge-swap", icons::SWAP, "Swap left and right (F9)", p).ld_click(
-                    true,
-                    cx.listener(|this, _, window, cx| this.swap_sides(window, cx)),
-                ),
+                ld_icon_button("merge-swap", icons::SWAP, tr("Swap left and right (F9)"), p)
+                    .ld_click(
+                        true,
+                        cx.listener(|this, _, window, cx| this.swap_sides(window, cx)),
+                    ),
             )
             .child(
-                ld_button("merge-clear", "Clear all", p)
-                    .ld_tooltip("Empty all three slots")
+                ld_button("merge-clear", tr("Clear all"), p)
+                    .ld_tooltip(tr("Empty all three slots"))
                     .ld_click(
                         true,
                         cx.listener(|this, _, window, cx| this.clear_all(window, cx)),
                     ),
             )
             .child(
-                ld_label_icon_button("merge-run", "Merge", icons::RUN, p)
+                ld_label_icon_button("merge-run", tr("Merge"), icons::RUN, p)
                     .as_primary(p)
-                    .ld_tooltip("Merge the three sides (Ctrl+Enter)")
+                    .ld_tooltip(tr("Merge the three sides (Ctrl+Enter)"))
                     .ld_click(
                         self.can_run(),
                         cx.listener(|this, _, window, cx| this.run(false, window, cx)),
@@ -792,16 +806,16 @@ impl MergeView {
                                 div()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(title_color)
-                                    .child(side.title),
+                                    .child(tr(side.title)),
                             )
-                            .child(div().min_w_0().text_color(p.muted).child(side.note)),
+                            .child(div().min_w_0().text_color(p.muted).child(tr(side.note))),
                     )
-                    .child(ld_button(side.open, "Open…", p).ld_small().ld_click(
+                    .child(ld_button(side.open, tr("Open…"), p).ld_small().ld_click(
                         true,
                         cx.listener(move |this, _, window, cx| this.pick_file(slot, window, cx)),
                     ))
                     .child(
-                        ld_small_icon_button(side.clear, icons::CLOSE, "Empty this slot", p)
+                        ld_small_icon_button(side.clear, icons::CLOSE, tr("Empty this slot"), p)
                             .ld_click(
                                 true,
                                 cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -820,7 +834,7 @@ impl MergeView {
                     .when_some(path_tip, |d, tip| {
                         d.tooltip(move |window, cx| ld_tip(tip.clone(), window, cx))
                     })
-                    .child(text.name.clone()),
+                    .child(shown_name(&text.name)),
             )
             .child(
                 div()
@@ -840,7 +854,7 @@ impl MergeView {
                         .min_h(px(200.))
                         .font(fonts.code.clone())
                         .text_size(px(CODE_SIZE))
-                        .child(Textarea::new(&self.pastes[slot]).h(relative(1.))),
+                        .child(ld_textarea(&self.pastes[slot]).h(relative(1.))),
                 )
             })
             .into_any_element()
@@ -857,52 +871,52 @@ impl MergeView {
             .gap(px(8.))
             .child(
                 div()
+                    .id("merge-hint-title")
+                    .test_support()
                     .text_size(px(16.))
                     .font_weight(FontWeight::BOLD)
-                    .child("3-way merge: combine the edits of two sides."),
+                    .prose(tr("3-way merge: combine the edits of two sides.")),
             )
-            .child(rich(&[
-                ("Choose ", None),
-                ("Left", left),
-                (" (your version), ", None),
-                ("Base", base),
-                (" (the common original both sides started from) and ", None),
-                ("Right", right),
-                (" (their version).", None),
-            ]))
-            .child(rich(&[
+            .child(div().id("merge-hint-choose").test_support().child(rich_prose(&[
+                (tr("Choose "), None),
+                (tr("Left"), left),
+                (tr(" (your version), "), None),
+                (tr("Base"), base),
+                (tr(" (the common original both sides started from) and "), None),
+                (tr("Right"), right),
+                (tr(" (their version)."), None),
+            ])))
+            .child(div().id("merge-hint-parts").test_support().child(rich_prose(&[
                 (
-                    "Parts changed on one side only, or changed the same way on both, merge on their own. Parts both sides changed differently are ",
+                    tr("Parts changed on one side only, or changed the same way on both, merge on their own. Parts both sides changed differently are "),
                     None,
                 ),
-                ("conflicts", Some(p.del)),
+                (tr("conflicts"), Some(p.del)),
                 (
-                    ": choose left, right, both, base or type the result, then save.",
+                    tr(": choose left, right, both, base or type the result, then save."),
                     None,
                 ),
-            ]))
+            ])))
             .child(
                 div()
+                    .id("merge-hint-drop")
+                    .test_support()
                     .text_color(p.dim)
-                    .child("Drop 3 files at once for left, base and right in that order, drop 1 file on its slot, or switch to “Paste text”."),
+                    .prose(tr("Drop 3 files at once for left, base and right in that order, drop 1 file on its slot, or switch to “Paste text”.")),
             )
     }
 
     fn render_input_status(&self, p: &Palette) -> impl IntoElement {
         let parts = self.status_parts();
-        let notice = self.notice.clone().map(|notice| {
-            div()
-                .id("merge-notice")
-                .test_support()
-                .flex_none()
-                .text_color(p.text)
-                .child(notice)
-        });
+        let notice = self
+            .notice
+            .clone()
+            .map(|notice| status_notice("merge-notice", notice, p));
         status_bar("merge-status", p)
             .child(if parts.is_empty() {
-                status_line_box("")
+                status_line_box("merge-status-text", "", "")
             } else {
-                status_parts_row(&parts, p)
+                status_parts_row("merge-status-text", &parts, p)
             })
             .children(notice)
     }

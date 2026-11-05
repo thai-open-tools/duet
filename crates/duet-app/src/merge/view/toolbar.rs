@@ -10,18 +10,38 @@ use super::*;
 use crate::ui::fonts::{Fonts, SMALL_SIZE};
 
 /// F5 over choices that are not saved (`js:681`).
-const RELOAD: &str = "Reloading drops the conflict choices you have not saved.";
-const SWAPPED: &str = "Swapped left and right.";
-const SWAPPED_SESSION: &str =
-    "Swapped left and right. The result now uses the new left file's encoding and line endings.";
+const RELOAD: &str = tr_key("Reloading drops the conflict choices you have not saved.");
+const RELOAD_ANSWERS: [&str; 2] = [tr_key("Cancel"), tr_key("Reload")];
+const SWAPPED: &str = tr_key("Swapped left and right.");
+const SWAPPED_SESSION: &str = tr_key(
+    "Swapped left and right. The result now uses the new left file's encoding and line endings.",
+);
 /// The option over choices that are not saved (`js:691`).
 const TRAIL_AGAIN: &str =
-    "Changing this option merges again and drops the conflict choices you have not saved.";
+    tr_key("Changing this option merges again and drops the conflict choices you have not saved.");
+const TRAIL_ANSWERS: [&str; 2] = [tr_key("Cancel"), tr_key("Merge again")];
 use crate::ui::icons;
 use crate::ui::style::{
     LdExt as _, ld_button, ld_icon_button, ld_primary, ld_segment, ld_segmented, ld_separator,
     ld_toggle,
 };
+
+/// What the walk goes over, in the current language: the conflicts when there are any, else the
+/// changes (the same choice as the session's `nav_word`, whose English comes from core).
+fn nav_word(session: &MergeSession) -> &'static str {
+    if session.conflicts().is_empty() {
+        tr("change")
+    } else {
+        tr("conflict")
+    }
+}
+
+/// "Conflict 1 / 2" in the current language: the session's `position_text`, from the same data.
+fn position_text(session: &MergeSession) -> String {
+    let (place, total) = session.position();
+    let place = place.map_or_else(|| "\u{2013}".to_owned(), |place| place.to_string());
+    trf("{} {} / {}", &[&tr(session.nav_word()), &place, &total])
+}
 
 impl MergeView {
     /// F7, F8, Ctrl+Home, Ctrl+End and ◀ ▶ (R16): the conflicts when there are any, else the
@@ -33,7 +53,7 @@ impl MergeView {
             return;
         };
         let target = session.nav(nav);
-        let word = session.nav_word().to_lowercase();
+        let word = nav_word(session);
         let nothing = session.changes().is_empty();
         self.leave_input(window, cx);
         self.stage = Stage::Merge;
@@ -44,11 +64,11 @@ impl MergeView {
             }
             None => {
                 let text = if nothing {
-                    "No differences.".to_owned()
+                    tr("No differences.").to_owned()
                 } else if nav == Nav::Prev {
-                    format!("No previous {word}.")
+                    trf("No previous {}.", &[&word])
                 } else {
-                    format!("No next {word}.")
+                    trf("No next {}.", &[&word])
                 };
                 self.notice = Some(text.into());
             }
@@ -86,13 +106,13 @@ impl MergeView {
     pub fn swap_sides(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.swap_now(window, cx);
         let Some(session) = self.session.as_ref() else {
-            self.notice = Some(SWAPPED.into());
+            self.notice = Some(tr(SWAPPED).into());
             cx.notify();
             return;
         };
         let [left, base, right] =
             [session.left(), session.base(), session.right()].map(|text| text.path.clone());
-        self.notice = Some(SWAPPED_SESSION.into());
+        self.notice = Some(tr(SWAPPED_SESSION).into());
         cx.emit(MergeEvent::Swapped { left, base, right });
         cx.notify();
     }
@@ -149,9 +169,9 @@ impl MergeView {
         }
         let answer = window.prompt(
             PromptLevel::Warning,
-            RELOAD,
+            tr(RELOAD),
             None,
-            &["Cancel", "Reload"],
+            &answers(&RELOAD_ANSWERS),
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -173,7 +193,7 @@ impl MergeView {
             })
             .collect();
         if files.is_empty() {
-            self.notice = Some("No files to reload.".into());
+            self.notice = Some(tr("No files to reload.").into());
             cx.notify();
             return;
         }
@@ -207,9 +227,9 @@ impl MergeView {
         }
         let answer = window.prompt(
             PromptLevel::Warning,
-            TRAIL_AGAIN,
+            tr(TRAIL_AGAIN),
             None,
-            &["Cancel", "Merge again"],
+            &answers(&TRAIL_ANSWERS),
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -270,15 +290,15 @@ impl MergeView {
         let segments = [
             stage_segment(
                 "merge-stage-input",
-                "Input",
-                "Choose or paste the three sides",
+                tr("Input"),
+                tr("Choose or paste the three sides"),
                 Stage::Input,
                 false,
             ),
             stage_segment(
                 "merge-stage-merge",
-                "Merge result",
-                "Resolve the conflicts one by one",
+                tr("Merge result"),
+                tr("Resolve the conflicts one by one"),
                 Stage::Merge,
                 true,
             ),
@@ -286,10 +306,10 @@ impl MergeView {
         let session = self.session.as_ref();
         let can_go = |forward| session.is_some_and(|s| s.can_go(forward));
         let position: SharedString = session
-            .map_or_else(|| "Conflict 0 / 0".to_owned(), MergeSession::position_text)
+            .map_or_else(|| tr("Conflict 0 / 0").to_owned(), position_text)
             .into();
         // The walk is over the conflicts, else the changes (M10).
-        let word = session.map_or("conflict".to_owned(), |s| s.nav_word().to_lowercase());
+        let word = session.map_or(tr("conflict"), nav_word);
         // Bulk resolve waits for conflicts (`updateToolbar`).
         let has_session = session.is_some();
         let has_conflicts = session.is_some_and(|s| !s.conflicts().is_empty());
@@ -321,7 +341,7 @@ impl MergeView {
             .child(ld_segmented("merge-stage-seg", segments, p))
             .child(ld_separator(p))
             .child(
-                ld_icon_button("merge-prev", icons::PREV, format!("Previous {word} (F7)"), p).ld_click(
+                ld_icon_button("merge-prev", icons::PREV, trf("Previous {} (F7)", &[&word]), p).ld_click(
                     can_go(false),
                     cx.listener(|this, _, window, cx| this.go(Nav::Prev, window, cx)),
                 ),
@@ -340,7 +360,7 @@ impl MergeView {
                     .child(position),
             )
             .child(
-                ld_icon_button("merge-next", icons::NEXT, format!("Next {word} (F8)"), p).ld_click(
+                ld_icon_button("merge-next", icons::NEXT, trf("Next {} (F8)", &[&word]), p).ld_click(
                     can_go(true),
                     cx.listener(|this, _, window, cx| this.go(Nav::Next, window, cx)),
                 ),
@@ -348,21 +368,21 @@ impl MergeView {
             .child(ld_separator(p))
             .child(bulk(
                 "merge-all-left",
-                "Resolve all with left",
-                "Use the left side for every conflict not resolved yet",
+                tr("Resolve all with left"),
+                tr("Use the left side for every conflict not resolved yet"),
                 How::Left,
             ))
             .child(bulk(
                 "merge-all-right",
-                "Resolve all with right",
-                "Use the right side for every conflict not resolved yet",
+                tr("Resolve all with right"),
+                tr("Use the right side for every conflict not resolved yet"),
                 How::Right,
             ))
             .child(ld_separator(p))
             .child(
-                ld_toggle("merge-trail", "Ignore trailing whitespace", self.trail, p)
+                ld_toggle("merge-trail", tr("Ignore trailing whitespace"), self.trail, p)
                     .ld_tooltip(
-                        "Lines that differ only in spaces or tabs at the end count as the same (merges again)",
+                        tr("Lines that differ only in spaces or tabs at the end count as the same (merges again)"),
                     )
                     .ld_click(
                         true,
@@ -375,11 +395,11 @@ impl MergeView {
             .child(
                 ld_toggle(
                     "merge-show-result",
-                    "Show the whole result",
+                    tr("Show the whole result"),
                     self.show_result,
                     p,
                 )
-                .ld_tooltip("Show the assembled result beside the changes")
+                .ld_tooltip(tr("Show the assembled result beside the changes"))
                 .ld_click(
                     self.stage == Stage::Merge && session.is_some(),
                     cx.listener(|this, _, _, cx| {
@@ -390,17 +410,17 @@ impl MergeView {
             )
             .child(div().flex_1())
             .child(
-                ld_button("merge-copy", "Copy result", p)
-                    .ld_tooltip("Copy the whole result to the clipboard")
+                ld_button("merge-copy", tr("Copy result"), p)
+                    .ld_tooltip(tr("Copy the whole result to the clipboard"))
                     .ld_click(
                         has_session,
                         cx.listener(|this, _, _, cx| this.copy_result(cx)),
                     ),
             )
             .child(
-                ld_button("merge-export", "Export with conflict markers", p)
+                ld_button("merge-export", tr("Export with conflict markers"), p)
                     .ld_tooltip(
-                        "Save as a new file, writing unresolved conflicts as <<<<<<< left / ||||||| base / ======= / >>>>>>> right",
+                        tr("Save as a new file, writing unresolved conflicts as <<<<<<< left / ||||||| base / ======= / >>>>>>> right"),
                     )
                     .ld_click(
                         has_session,
@@ -408,8 +428,8 @@ impl MergeView {
                     ),
             )
             .child(
-                ld_primary("merge-save", "Save result", p)
-                    .ld_tooltip("Save the result (Ctrl+S)")
+                ld_primary("merge-save", tr("Save result"), p)
+                    .ld_tooltip(tr("Save the result (Ctrl+S)"))
                     .ld_click(
                         has_session,
                         cx.listener(|this, _, window, cx| this.save(false, window, cx).detach()),

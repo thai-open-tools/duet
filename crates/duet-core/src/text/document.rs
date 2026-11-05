@@ -41,6 +41,8 @@ pub enum ReadOnlyReason {
     LossyDecode,
     /// A pretty-printed view (Format button); the file itself is untouched.
     Formatted,
+    /// A view with the keys of JSON or YAML sorted (Sort keys button); the file is untouched.
+    Sorted,
     /// The file has the read-only attribute (C23): clear it to edit the file in duet.
     Attribute,
 }
@@ -234,6 +236,16 @@ impl TextDocument {
             stamp: self.stamp,
             read_only: Some(ReadOnlyReason::Formatted),
         }
+    }
+
+    /// A read-only copy that shows `text`, this document with its keys sorted, in its place.
+    /// Like `formatted`, the shown text keeps the `\n` breaks it was given, not the file's own: a
+    /// file with CRLF would else show every line as changed against one with LF. Path, encoding
+    /// and file stamp stay the same.
+    pub fn sorted(&self, text: String) -> TextDocument {
+        let mut shown = self.formatted(text);
+        shown.read_only = Some(ReadOnlyReason::Sorted);
+        shown
     }
 
     /// A writable copy holding `text`, the edited form of this document: same path, encoding
@@ -546,6 +558,32 @@ mod tests {
         assert_eq!(shown.read_only_reason(), Some(ReadOnlyReason::Formatted));
         assert!(shown.encoding().bom);
         assert_eq!(shown.path(), doc.path());
+    }
+
+    #[test]
+    fn a_sorted_copy_is_read_only_and_keeps_path_encoding_and_stamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.json");
+        std::fs::write(&path, "\u{feff}{\"b\":1,\"a\":2}").unwrap();
+        let doc = TextDocument::open(&path, &CancelToken::new()).unwrap();
+        let shown = doc.sorted("{\n  \"a\": 2,\n  \"b\": 1\n}".into());
+        assert_eq!(shown.line_count(), 4);
+        assert_eq!(shown.read_only_reason(), Some(ReadOnlyReason::Sorted));
+        assert!(shown.encoding().bom);
+        assert_eq!(shown.path(), doc.path());
+        assert_eq!(shown.stamp(), doc.stamp());
+    }
+
+    #[test]
+    fn the_sorted_view_always_has_lf_breaks_whatever_the_file_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.json");
+        std::fs::write(&path, "{\"b\":1,\r\n\"a\":2}\r\n").unwrap();
+        let doc = TextDocument::open(&path, &CancelToken::new()).unwrap();
+        assert_eq!(doc.eol(), EolStyle::CrLf);
+        let shown = doc.sorted("{\n  \"a\": 2,\n  \"b\": 1\n}\n".into());
+        assert_eq!(shown.eol(), EolStyle::Lf);
+        assert_eq!(shown.text(), Some("{\n  \"a\": 2,\n  \"b\": 1\n}\n"));
     }
 
     #[test]

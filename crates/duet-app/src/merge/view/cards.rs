@@ -30,6 +30,7 @@ use crate::merge::menu::card_menu;
 use crate::text::display::{DisplayOptions, display_line};
 use crate::ui::fonts::{CODE_SIZE, Fonts, SMALL_SIZE};
 use crate::ui::menu::fill;
+use crate::ui::prose::ProseExt as _;
 
 /// A code row in a stable box or a card column.
 pub(super) const ROW_HEIGHT: f32 = 19.;
@@ -51,9 +52,10 @@ const OUTLINE: f32 = 4.;
 /// The list's bottom padding, so the last card can scroll up off the edge (`css:49`).
 const LIST_BOTTOM: f32 = 48.;
 
-const SAME: &str = "✓ The three files are the same: nothing to merge.";
-const TRAIL_NOTE: &str = "Ignoring trailing whitespace: the parts that match use the left text.";
-const EMPTY: &str = "The three files are empty.";
+const SAME: &str = tr_key("✓ The three files are the same: nothing to merge.");
+const TRAIL_NOTE: &str =
+    tr_key("Ignoring trailing whitespace: the parts that match use the left text.");
+const EMPTY: &str = tr_key("The three files are empty.");
 
 /// One row of a card column, as drawn: the number, the text with its tabs expanded, whether
 /// it differs from the base, and the characters that do (byte ranges in `text`).
@@ -123,9 +125,9 @@ fn column_text(
         .collect();
     let more = (shown < range.end).then(|| {
         let left = u64::from(range.end - shown);
-        format!(
+        trf(
             "… {}: click to show all",
-            count_of(left, "more line", "more lines")
+            &[&count_of(left, "more line", "more lines")],
         )
     });
     ColumnText {
@@ -161,9 +163,9 @@ fn card_text_with(
     let (left, base, right) = (session.left(), session.base(), session.right());
     let removed = |side: &str| {
         if region.base.is_empty() {
-            "(no lines)".to_owned()
+            tr("(no lines)").to_owned()
         } else {
-            format!("({side} removed this part)")
+            trf("({} removed this part)", &[&side])
         }
     };
     Some(CardText {
@@ -172,27 +174,27 @@ fn card_text_with(
         place: where_text(region.base.clone()),
         columns: [
             column_text(
-                "Left",
+                tr("Left"),
                 left,
                 region.left.clone(),
                 &marks.left,
-                removed("left"),
+                removed(tr(SLOT_NAMES[LEFT])),
                 full,
             ),
             column_text(
-                "Base",
+                tr("Base"),
                 base,
                 region.base.clone(),
                 &marks.base,
-                "(not in the base: new lines)".to_owned(),
+                tr("(not in the base: new lines)").to_owned(),
                 full,
             ),
             column_text(
-                "Right",
+                tr("Right"),
                 right,
                 region.right.clone(),
                 &marks.right,
-                removed("right"),
+                removed(tr(SLOT_NAMES[RIGHT])),
                 full,
             ),
         ],
@@ -263,6 +265,14 @@ impl Cards {
         self.menu_target = None;
         self.index();
         self.list.reset(self.items.len());
+    }
+
+    /// The language changed: every card's text is built again when it is drawn, and the list
+    /// measures every item again where it stands, as a Thai line can wrap where an English one
+    /// did not. The scroll place, the folds and the result fields are not touched.
+    pub(super) fn relabel(&mut self) {
+        self.texts.iter_mut().for_each(|text| *text = None);
+        self.list.remeasure_items(0..self.items.len());
     }
 
     /// Chunks come in order and each has at least one item.
@@ -461,6 +471,15 @@ impl MergeView {
             .get(chunk)?
             .as_ref()
             .map(|field| &field.state)
+    }
+
+    /// Every result field made so far, with its chunk.
+    pub(super) fn fields_made(&self) -> impl Iterator<Item = (usize, &Entity<TextareaState>)> {
+        self.cards
+            .fields
+            .iter()
+            .enumerate()
+            .filter_map(|(chunk, field)| Some((chunk, &field.as_ref()?.state)))
     }
 
     /// Every result field made so far.
@@ -737,16 +756,16 @@ impl MergeView {
                 line, first, last, ..
             } => self.render_row(line, first, last, &p, &fonts),
             Item::Fold { chunk, hidden } => {
-                let text = format!(
+                let text = trf(
                     "⋯ {}: click to expand",
-                    count_of(u64::from(hidden), "same line", "same lines")
+                    &[&count_of(u64::from(hidden), "same line", "same lines")],
                 );
                 render_bar(chunk, false, text, &p, cx)
             }
             Item::Collapse { chunk, lines } => {
-                let text = format!(
+                let text = trf(
                     "▴ Collapse {}",
-                    count_of(u64::from(lines), "same line", "same lines")
+                    &[&count_of(u64::from(lines), "same line", "same lines")],
                 );
                 render_bar(chunk, true, text, &p, cx)
             }
@@ -864,7 +883,7 @@ impl MergeView {
                     .text_color(kind_color)
                     .text_size(px(11.))
                     .font_weight(FontWeight::BOLD)
-                    .child(text.badge),
+                    .child(tr(text.badge)),
             )
             .child(state)
             .child(div().flex_1())
@@ -960,9 +979,9 @@ impl MergeView {
 /// A banner over the cards (`js:477-482`).
 fn render_banner(banner: Banner, p: &Palette) -> AnyElement {
     let (id, text) = match banner {
-        Banner::Same => ("merge-banner-same", SAME),
-        Banner::TrailNote => ("merge-banner-trail", TRAIL_NOTE),
-        Banner::Empty => ("merge-banner-empty", EMPTY),
+        Banner::Same => ("merge-banner-same", tr(SAME)),
+        Banner::TrailNote => ("merge-banner-trail", tr(TRAIL_NOTE)),
+        Banner::Empty => ("merge-banner-empty", tr(EMPTY)),
     };
     let body = div()
         .id(id)
@@ -973,7 +992,7 @@ fn render_banner(banner: Banner, p: &Palette) -> AnyElement {
         .rounded(px(BOX_RADIUS))
         .border_1()
         .text_size(px(CODE_SIZE))
-        .child(text);
+        .prose(text);
     let body = match banner {
         Banner::Same => body
             .text_color(p.ins)
@@ -1013,7 +1032,7 @@ fn render_bar(
         .cursor_pointer()
         .hover(move |s| s.text_color(accent))
         .on_click(cx.listener(move |this, _, _, cx| this.toggle_fold(chunk, cx)))
-        .child(text);
+        .prose(text);
     item_frame(if open { BOX_GAP } else { 0. })
         .child(
             div()

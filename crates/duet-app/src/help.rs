@@ -11,18 +11,20 @@ mod th;
 pub mod topics;
 
 use gpui_kit::TestSupportExt as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, Context, Div, Entity, FocusHandle, Focusable, Font, FontWeight, KeyBinding,
-    ScrollHandle, Subscription, Window, actions, div, point, prelude::*, px, relative,
+    AnyElement, App, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, Font, FontWeight,
+    KeyBinding, ScrollHandle, Subscription, Window, actions, div, point, prelude::*, px, relative,
     transparent_black,
 };
 
 use self::markup::Span;
 use self::topics::{Block, GROUPS, HelpLang, PageCopy, TOPICS};
 use crate::folder::view::legend::sample;
+use crate::i18n::tr;
 use crate::palette::Palette;
+use crate::ui::edit_menu::ld_input;
 use crate::ui::fonts::{Fonts, UI_SIZE};
 use crate::ui::style::{
     LdExt as _, SMALL_ICON_SIZE, ld_button, ld_card, ld_dot, ld_icon, ld_kbd, ld_segment,
@@ -57,6 +59,12 @@ pub fn key_bindings() -> Vec<KeyBinding> {
     ]
 }
 
+pub enum HelpEvent {
+    /// The Help tab's own switch chose a language: the other tabs and the window follow. An event,
+    /// because the view is leased while its own click runs.
+    LangChosen,
+}
+
 pub struct HelpView {
     lang: HelpLang,
     search: Entity<InputState>,
@@ -74,6 +82,8 @@ pub struct HelpView {
     _subscriptions: Vec<Subscription>,
 }
 
+impl EventEmitter<HelpEvent> for HelpView {}
+
 impl Focusable for HelpView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
@@ -81,9 +91,9 @@ impl Focusable for HelpView {
 }
 
 impl HelpView {
-    /// Opens in the saved language, else Thai (H3), at the first topic.
+    /// Opens in the UI's language, at the first topic.
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let lang = HelpLang::load(crate::settings::settings_file(cx).as_deref());
+        let lang = HelpLang::current();
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder(topics::page_copy(lang).search));
         let subscriptions = vec![cx.subscribe_in(
@@ -114,9 +124,20 @@ impl HelpView {
         self.lang
     }
 
-    /// The other language: every string is drawn again in it, the topic and the query stay,
-    /// the search runs again, and the choice is saved (H3).
+    /// The switch chose a language: it is the whole app's, and it is saved.
     pub fn set_lang(&mut self, lang: HelpLang, window: &mut Window, cx: &mut Context<Self>) {
+        if lang == self.lang {
+            return;
+        }
+        crate::i18n::choose(lang.into(), cx);
+        self.relabel(window, cx);
+        cx.emit(HelpEvent::LangChosen);
+    }
+
+    /// The UI's language changed: every string is drawn again in it, the topic and the query
+    /// stay, and the search runs again (H3).
+    pub fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let lang = HelpLang::current();
         if lang == self.lang {
             return;
         }
@@ -127,11 +148,6 @@ impl HelpView {
             state.set_placeholder(placeholder, window, cx)
         });
         self.refilter(cx);
-        if let Some(path) = crate::settings::settings_file(cx)
-            && let Err(err) = lang.save(&path)
-        {
-            tracing::warn!(%err, "could not save the help language");
-        }
         cx.notify();
     }
 
@@ -336,7 +352,7 @@ impl HelpView {
                 div()
                     .id("help-search")
                     .test_support()
-                    .child(Input::new(&self.search).aria_label(copy.search_name)),
+                    .child(ld_input(&self.search).aria_label(copy.search_name)),
             )
             .child(
                 v_flex()
@@ -571,7 +587,7 @@ impl<'a> Pieces<'a> {
             .when_some(topics::chip_icon(label, p.dark), |chip, icon| {
                 chip.child(ld_icon(icon, SMALL_ICON_SIZE))
             })
-            .child(label)
+            .child(tr(label))
     }
 
     /// Keys, as the shortcut sheet draws them (U8).

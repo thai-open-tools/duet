@@ -176,3 +176,30 @@ fn control_labels_carry_no_icon_characters() {
         "icon characters in labels; use an icon from ui::icons: {found:#?}"
     );
 }
+
+/// A kit menu row can wrap a Thai label (see `ui::menu::one_line`), so every row is made in one
+/// place. A view that wants a menu row calls `ui::menu::row`.
+#[test]
+fn menu_rows_are_made_in_one_place() {
+    fn visit(dir: &Path, found: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                visit(&path, found);
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && path.file_name().is_some_and(|n| n != "menu.rs")
+                && std::fs::read_to_string(&path)
+                    .unwrap()
+                    .contains("PopupMenuItem::new(")
+            {
+                found.push(path.display().to_string());
+            }
+        }
+    }
+    let mut found = Vec::new();
+    visit(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut found,
+    );
+    assert!(found.is_empty(), "use ui::menu::row: {found:?}");
+}

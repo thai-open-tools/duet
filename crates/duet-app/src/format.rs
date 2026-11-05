@@ -34,9 +34,14 @@ pub fn human_size(bytes: u64) -> String {
 }
 
 /// A count and its noun, with thousands separators: "1 file", "0 files", "1,234 files". The one
-/// place a count meets a noun, so the singular is never missed.
-pub fn count_of(n: u64, one: &str, many: &str) -> String {
-    format!("{} {}", format_size(n), if n == 1 { one } else { many })
+/// place a count meets a noun, so the singular is never missed. Thai has no plural: `many` is the
+/// key, whatever the count, and the digits stay Arabic.
+pub fn count_of(n: u64, one: &'static str, many: &'static str) -> String {
+    let noun = match crate::i18n::current() {
+        crate::i18n::Lang::En if n == 1 => one,
+        _ => crate::i18n::tr(many),
+    };
+    format!("{} {noun}", format_size(n))
 }
 
 /// The encoding as the status and the name tooltip show it: "UTF-8", "UTF-8 (BOM)".

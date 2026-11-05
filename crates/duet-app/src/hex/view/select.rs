@@ -7,12 +7,13 @@ use gpui_kit::{ClipboardItem, MouseDownEvent, Point};
 use super::rows::{Picked, row_span};
 use super::*;
 use crate::format::count_of;
+use crate::i18n::{tr, tr_key, trf};
 
 /// The most source bytes one copy takes (R9).
 const COPY_CAP: u64 = 1 << 20;
-const COPIED_CAPPED: &str = "Copied the first 1 MiB of the selection.";
-const COPIED_ROW: &str = "Copied the cursor row.";
-const NOTHING_TO_COPY: &str = "Nothing to copy: click a byte or select a range first.";
+const COPIED_CAPPED: &str = tr_key("Copied the first 1 MiB of the selection.");
+const COPIED_ROW: &str = tr_key("Copied the cursor row.");
+const NOTHING_TO_COPY: &str = tr_key("Nothing to copy: click a byte or select a range first.");
 
 /// A listener that moves the cursor (`extend`: Shift is held) unless a field has the keys.
 macro_rules! step_key {
@@ -135,7 +136,7 @@ impl HexView {
             Step::End => row * bpr + bpr - 1,
             Step::Up | Step::Down | Step::PageUp | Step::PageDown => {
                 if self.only_diff && self.diff_rows.is_none() {
-                    self.notice = Some(STILL_COMPARING.into());
+                    self.notice = Some(tr(STILL_COMPARING).into());
                     cx.notify();
                     return;
                 }
@@ -220,9 +221,9 @@ impl HexView {
             let have = range.end.min(side(left).len());
             if range.start >= have {
                 self.notice = Some(
-                    format!(
+                    trf(
                         "The selection is past the end of the {} file.",
-                        if left { "left" } else { "right" }
+                        &[&tr(if left { "left" } else { "right" })],
                     )
                     .into(),
                 );
@@ -232,9 +233,12 @@ impl HexView {
             let end = have.min(range.start.saturating_add(COPY_CAP));
             let text = bytes_hex(&side(left).bytes(range.start..end));
             let notice = if end < have {
-                COPIED_CAPPED.to_owned()
+                tr(COPIED_CAPPED).to_owned()
             } else {
-                format!("Copied {}.", count_of(end - range.start, "byte", "bytes"))
+                trf(
+                    "Copied {}.",
+                    &[&count_of(end - range.start, "byte", "bytes")],
+                )
             };
             (text, notice)
         } else if let Some((left, at)) = self.cursor.or_else(|| {
@@ -251,9 +255,9 @@ impl HexView {
                 bpr as usize,
                 pair.max_len().saturating_sub(1),
             );
-            (line, COPIED_ROW.to_owned())
+            (line, tr(COPIED_ROW).to_owned())
         } else {
-            self.notice = Some(NOTHING_TO_COPY.into());
+            self.notice = Some(tr(NOTHING_TO_COPY).into());
             cx.notify();
             return;
         };
@@ -321,7 +325,7 @@ impl HexView {
             "0x{}",
             format_offset(offset, pair.max_len().saturating_sub(1))
         );
-        self.notice = Some(format!("Copied {text}.").into());
+        self.notice = Some(trf("Copied {}.", &[&text]).into());
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         cx.notify();
     }

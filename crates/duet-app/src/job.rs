@@ -35,6 +35,14 @@ impl JobSlot {
         }
     }
 
+    /// Cancels the token of the running job but leaves it current: its result still arrives
+    /// and is applied. For a pass whose cancel means "stop looking", not "throw it all away".
+    pub fn stop_pass(&self) {
+        if let Some(token) = &self.cancel {
+            token.cancel();
+        }
+    }
+
     pub fn is_running(&self) -> bool {
         self.cancel.is_some()
     }

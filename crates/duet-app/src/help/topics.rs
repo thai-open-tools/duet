@@ -3,52 +3,44 @@
 //! its group in the topic list (U10). The page draws each text as pieces (H6) with chips and
 //! keys (U8, `markup`), so the data keeps every piece short; `tests` holds it to that.
 
-use std::path::Path;
-
 use gpui_kit::assets::IconName;
 
 use super::{en, markup, th};
 use crate::folder::view::legend::{LEGEND, LEGEND_TH};
+use crate::i18n::Lang;
 use crate::start::{SHORTCUTS, SHORTCUTS_TH};
 use crate::ui::icons;
 
-/// The help's language (H3). With no saved choice the page opens in Thai.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// The language a help text is written in. The app has one language, `i18n`'s, and the help
+/// follows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelpLang {
-    #[default]
     Th,
     En,
 }
 
 impl HelpLang {
-    /// The `settings.json` key that keeps the choice.
-    pub const KEY: &str = "help.lang";
+    /// The language the UI reads in now.
+    pub fn current() -> Self {
+        crate::i18n::current().into()
+    }
+}
 
-    pub fn code(self) -> &'static str {
-        match self {
-            HelpLang::Th => "th",
-            HelpLang::En => "en",
+impl From<Lang> for HelpLang {
+    fn from(lang: Lang) -> Self {
+        match lang {
+            Lang::Th => HelpLang::Th,
+            Lang::En => HelpLang::En,
         }
     }
+}
 
-    pub fn from_code(code: &str) -> Option<Self> {
-        match code {
-            "th" => Some(HelpLang::Th),
-            "en" => Some(HelpLang::En),
-            _ => None,
+impl From<HelpLang> for Lang {
+    fn from(lang: HelpLang) -> Self {
+        match lang {
+            HelpLang::Th => Lang::Th,
+            HelpLang::En => Lang::En,
         }
-    }
-
-    /// The saved choice; no settings file, no key or an unknown value gives Thai.
-    pub fn load(settings: Option<&Path>) -> Self {
-        settings
-            .and_then(|path| crate::settings::get_string(path, Self::KEY))
-            .and_then(|code| Self::from_code(&code))
-            .unwrap_or_default()
-    }
-
-    pub fn save(self, settings: &Path) -> std::io::Result<()> {
-        crate::settings::set_string(settings, Self::KEY, self.code())
     }
 }
 
@@ -253,6 +245,26 @@ pub fn chip_icon(label: &str, dark: bool) -> Option<IconName> {
     })
 }
 
+/// A chip's Thai (D7): its entry in the UI table, for the label a control shows in Thai.
+pub fn chip_th(label: &str) -> Option<&'static str> {
+    duet_core::i18n::lookup(crate::i18n::th::table(), label)
+}
+
+/// `text` as a search sees it: what the reader sees, and for a Thai page each chip in both
+/// languages, so either name finds the topic (D7).
+fn searchable(text: &str, lang: HelpLang) -> String {
+    markup::spans(text)
+        .into_iter()
+        .map(|span| match (span, lang) {
+            (markup::Span::Chip(label), HelpLang::Th) => match chip_th(label) {
+                Some(thai) if thai != label => format!("{thai} {label}"),
+                _ => label.to_owned(),
+            },
+            (other, _) => other.text().to_owned(),
+        })
+        .collect()
+}
+
 /// The page's own words in one language (H3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PageCopy {
@@ -326,8 +338,8 @@ pub fn topic_text(topic: &Topic, lang: HelpLang, keys: &[String]) -> String {
     let mut out = vec![text.title.to_owned(), text.keywords.to_owned()];
     for block in text.body {
         match block {
-            Block::Heading(t) | Block::Para(t) => out.push(markup::visible(t)),
-            Block::Bullets(items) => out.extend(items.iter().map(|t| markup::visible(t))),
+            Block::Heading(t) | Block::Para(t) => out.push(searchable(t, lang)),
+            Block::Bullets(items) => out.extend(items.iter().map(|t| searchable(t, lang))),
             Block::Shortcuts => {
                 for (keys, label) in keys.iter().zip(shortcut_labels(lang)) {
                     out.push(format!("{keys} {label}"));
@@ -398,6 +410,8 @@ pub fn is_thai_mark(c: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     const TITLES: [(&str, &str, &str); 15] = [
@@ -412,15 +426,64 @@ mod tests {
         (
             "rules",
             "Ignoring unimportant differences",
-            "ข้ามความต่างที่ไม่สำคัญ",
+            "ไม่สนใจความต่างที่ไม่สำคัญ",
         ),
         ("merge", "3-way merge", "รวมสามทาง (3-way merge)"),
         ("hex", "Hex", "เทียบแบบ Hex"),
         ("picture", "Pictures", "เทียบรูปภาพ"),
-        ("table", "Tables (CSV, TSV)", "เทียบตาราง (CSV, TSV)"),
-        ("keys", "Keyboard shortcuts", "คีย์ลัด"),
+        (
+            "table",
+            "Tables (CSV, TSV, Excel)",
+            "เทียบตาราง (CSV, TSV, Excel)",
+        ),
+        ("keys", "Keyboard shortcuts", "ปุ่มลัด"),
         ("faq", "Questions", "คำถามที่พบบ่อย"),
     ];
+
+    /// The text of a topic's paragraphs and bullets, joined.
+    fn words(text: &TopicText) -> String {
+        text.body
+            .iter()
+            .flat_map(|block| match block {
+                Block::Para(p) => vec![*p],
+                Block::Bullets(items) => items.to_vec(),
+                _ => Vec::new(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn the_table_help_topic_no_longer_says_xlsx_is_unsupported() {
+        let table = topic("table");
+        let en = words(&table.en);
+        assert!(!en.contains("does not open .xlsx"), "{en}");
+        assert!(en.contains(".xlsx") && en.contains("sheet"), "{en}");
+        // What a cell shows, the text marker and the limits are said.
+        for must in [
+            "0.25",
+            "2024-03-05",
+            "leading '",
+            "CSV file",
+            "read-only",
+            "never writes",
+        ] {
+            assert!(en.contains(must), "English table topic lacks {must}: {en}");
+        }
+        let th = words(&table.th);
+        assert!(!th.contains("เปิดไฟล์ .xlsx โดยตรงไม่ได้"), "{th}");
+        for must in [
+            ".xlsx",
+            "ชีต",
+            "0.25",
+            "2024-03-05",
+            "'",
+            "CSV",
+            "อ่านอย่างเดียว",
+        ] {
+            assert!(th.contains(must), "Thai table topic lacks {must}: {th}");
+        }
+    }
 
     fn topic(id: &str) -> &'static Topic {
         TOPICS.iter().find(|t| t.id == id).unwrap()
@@ -626,7 +689,7 @@ mod tests {
 
     /// Text in quotes that is not a control: a message, a badge, a column, a word, a value.
     /// Topic titles, quoted to point at another topic, are allowed too.
-    const QUOTED: [&str; 8] = [
+    const QUOTED: [&str; 13] = [
         "/bin/bash^M: bad interpreter",
         "3 files",
         "⚠ invisible",
@@ -635,6 +698,11 @@ mod tests {
         "Result",
         "left",
         "ซ้าย",
+        "3 ไฟล์",
+        "⚠ มองไม่เห็น",
+        "มองไม่เห็น",
+        "เวลาต่างกัน",
+        "ผลตรวจ",
     ];
 
     #[test]
@@ -832,7 +900,7 @@ mod tests {
         }
         let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let app = crates.join("duet-app").join("src");
-        let skip = [app.join("help"), app.join("help.rs")];
+        let skip = [app.join("help"), app.join("help.rs"), app.join("i18n")];
         let mut out = Vec::new();
         visit(&app, &skip, &mut out);
         visit(&crates.join("duet-core").join("src"), &skip, &mut out);
@@ -1105,6 +1173,130 @@ mod tests {
         }
     }
 
+    /// Every chip the Thai help draws, with the welcome card's.
+    fn thai_chip_labels() -> std::collections::BTreeSet<&'static str> {
+        drawn_texts(HelpLang::Th)
+            .into_iter()
+            .flat_map(|(_, text)| markup::marks(text))
+            .filter_map(|span| match span {
+                markup::Span::Chip(label) => Some(label),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_thai_chip_has_a_table_entry() {
+        let missing: Vec<_> = thai_chip_labels()
+            .into_iter()
+            .filter(|label| chip_th(label).is_none())
+            .collect();
+        assert!(missing.is_empty(), "no Thai entry for chips: {missing:#?}");
+    }
+
+    #[test]
+    fn thai_chips_name_what_the_controls_show() {
+        // A chip's Thai is the Thai of the control that carries the English label: the same
+        // text, or the text a tooltip adds a key hint to, or what a format string writes.
+        let literals = source_literals();
+        let mut drifted = Vec::new();
+        for label in thai_chip_labels() {
+            let Some(thai) = chip_th(label) else {
+                continue;
+            };
+            let shown: Vec<String> = literals
+                .iter()
+                .filter(|l| names_a_control(label, std::slice::from_ref(*l)))
+                .filter_map(|l| chip_th(l).map(str::to_owned))
+                .collect();
+            let alone = crate::i18n::th::chips::ENTRIES
+                .iter()
+                .any(|(key, _)| *key == label);
+            if shown.is_empty() {
+                if !alone && !SHORTENED.iter().any(|(short, ..)| *short == label) {
+                    drifted.push(format!("[{label}] → {thai}: no control carries it"));
+                }
+            } else if !names_a_control(thai, &shown) {
+                drifted.push(format!(
+                    "[{label}] → {thai}, but the control reads {shown:?}"
+                ));
+            }
+        }
+        assert!(drifted.is_empty(), "{drifted:#?}");
+    }
+
+    #[test]
+    fn thai_prose_names_a_control_by_its_thai_label_outside_a_chip() {
+        // D7: a control named in plain Thai prose is the label the Thai UI shows, not the English
+        // one. These are the English labels a Thai text once wrote bare.
+        const LATIN_LABELS: [&str; 10] = [
+            "Start",
+            "Recent",
+            "Quick",
+            "Same",
+            "All",
+            "Differences",
+            "Ignore",
+            "Options",
+            "Report",
+            "Content",
+        ];
+        let mut bare = Vec::new();
+        for (name, text) in drawn_texts(HelpLang::Th) {
+            for span in markup::spans(text) {
+                let markup::Span::Text(prose) = span else {
+                    continue;
+                };
+                for word in prose.split(|c: char| !c.is_ascii_alphanumeric()) {
+                    if LATIN_LABELS.contains(&word) {
+                        bare.push(format!("{name}: {word}"));
+                    }
+                }
+            }
+        }
+        assert!(bare.is_empty(), "write the Thai label: {bare:#?}");
+    }
+
+    #[test]
+    fn thai_chips_keep_their_pieces_short() {
+        for (name, text) in drawn_texts(HelpLang::Th) {
+            for piece in pieces(text) {
+                let seen: String = markup::spans(piece)
+                    .into_iter()
+                    .map(|span| match span {
+                        markup::Span::Chip(label) => chip_th(label).unwrap_or(label),
+                        other => other.text(),
+                    })
+                    .collect();
+                assert!(
+                    seen.chars().count() <= MAX_PIECE_CHARS,
+                    "{name}: {seen:?} is longer than a line can hold"
+                );
+                assert!(
+                    !seen.chars().next().is_some_and(is_thai_mark),
+                    "{name}: {seen:?} starts with a Thai mark"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_thai_topic_search_finds_a_chip_in_either_language() {
+        let keys = sheet_keys();
+        let at = |id: &str| TOPICS.iter().position(|t| t.id == id).unwrap();
+        let thai = search_texts(HelpLang::Th, &keys);
+        let swap = chip_th("Swap sides").expect("a Thai chip").to_lowercase();
+        assert_ne!(swap, "swap sides");
+        let folder = &thai[at("folder")];
+        assert!(folder.contains(&swap), "the Thai label finds the topic");
+        assert!(
+            folder.contains("swap sides"),
+            "the English label finds it too"
+        );
+        assert!(matching(&swap, &thai).contains(&at("folder")));
+        assert!(matching("swap sides", &thai).contains(&at("folder")));
+    }
+
     #[test]
     fn topic_pieces_follow_the_title_and_the_blocks() {
         let keys = topic("keys");
@@ -1119,30 +1311,5 @@ mod tests {
             "the sheet's descriptions are pieces too"
         );
         assert!(pieces_th.ends_with(&pieces(SHORTCUTS_TH.last().unwrap().1)));
-    }
-
-    #[test]
-    fn the_language_is_kept_under_help_lang() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        assert_eq!(HelpLang::load(None), HelpLang::Th, "no settings file: Thai");
-        assert_eq!(HelpLang::load(Some(&path)), HelpLang::Th, "no key: Thai");
-        HelpLang::En.save(&path).unwrap();
-        assert_eq!(
-            crate::settings::get_string(&path, "help.lang").as_deref(),
-            Some("en")
-        );
-        assert_eq!(HelpLang::load(Some(&path)), HelpLang::En);
-        crate::settings::set_string(&path, "help.lang", "fr").unwrap();
-        assert_eq!(
-            HelpLang::load(Some(&path)),
-            HelpLang::Th,
-            "an unknown value: Thai"
-        );
-        HelpLang::Th.save(&path).unwrap();
-        assert_eq!(
-            crate::settings::get_string(&path, "help.lang").as_deref(),
-            Some("th")
-        );
     }
 }

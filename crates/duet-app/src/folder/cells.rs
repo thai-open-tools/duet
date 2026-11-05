@@ -1,6 +1,7 @@
 //! Folder row cells: one side of a row, its tree guides, and the width rules that keep names
 //! readable on a narrow window.
 
+use std::rc::Rc;
 use std::time::SystemTime;
 
 use duet_core::folder::entry::Entry;
@@ -10,10 +11,11 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::h_flex;
 use gpui_kit::{
     AnyElement, App, Background, FontWeight, Hsla, MouseButton, MouseDownEvent, SharedString,
-    Window, canvas, div, fill, point, prelude::*, px, size,
+    Window, canvas, div, fill, point, prelude::*, px, relative, size,
 };
 
 use crate::format::format_time;
+use crate::i18n::tr;
 use crate::palette::Palette;
 use crate::status::Tone;
 use crate::ui::fonts::Fonts;
@@ -106,6 +108,47 @@ pub(super) struct Pill {
     pub(super) tip: SharedString,
 }
 
+/// The press handler of a tag, shared by the two cells of a row.
+pub(super) type TagPress = Rc<dyn Fn(&MouseDownEvent, &mut Window, &mut App)>;
+
+/// The tag on a moved or renamed file: its text, its tooltip and the press that jumps to the
+/// other file.
+#[derive(Clone)]
+pub(super) struct MovedTag {
+    pub(super) row: usize,
+    pub(super) text: SharedString,
+    pub(super) tip: SharedString,
+    pub(super) press: TagPress,
+}
+
+/// The widest a tag grows, as a part of the cell it sits in.
+pub(super) const TAG_SHARE: f32 = 0.45;
+
+/// A pill after the file name: "Moved ↔ other/path", cut inside the cell, the whole path in
+/// its tooltip. A press jumps to the other file and does not reach the row.
+pub(super) fn moved_tag(tag: MovedTag, p: &Palette) -> impl IntoElement {
+    let MovedTag {
+        row,
+        text,
+        tip,
+        press,
+    } = tag;
+    ld_pill(text.clone(), p.moved, p.panel3)
+        .id(("folder-moved-tag", row))
+        .test_support()
+        .aria_label(text)
+        .flex_initial()
+        .min_w_0()
+        .max_w(relative(TAG_SHARE))
+        .truncate()
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+            cx.stop_propagation();
+            press(event, window, cx)
+        })
+        .tooltip(move |window, cx| ld_tip(tip.clone(), window, cx))
+}
+
 pub(super) struct SideCell<'a, F> {
     pub(super) node: &'a Node,
     pub(super) entry: Option<&'a Entry>,
@@ -130,6 +173,8 @@ pub(super) struct SideCell<'a, F> {
     pub(super) on_expander: Option<F>,
     /// The invisible-character chip: its tooltip, and whether a hit is in the text or values.
     pub(super) odd: Option<(SharedString, bool)>,
+    /// The tag of a moved or renamed file, on the side that holds it.
+    pub(super) moved: Option<MovedTag>,
 }
 
 /// The size of tree names, in the code font.
@@ -142,6 +187,12 @@ const NAME_MIN_CHARS: usize = 4;
 pub fn name_min_width(name: &str, advance: f32) -> f32 {
     use unicode_segmentation::UnicodeSegmentation as _;
     name.graphemes(true).take(NAME_MIN_CHARS + 1).count() as f32 * advance
+}
+
+/// A name's whole width in the code font, with a column to spare: what the tag must leave.
+pub fn name_full_width(name: &str, advance: f32) -> f32 {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    (name.graphemes(true).count() + 1) as f32 * advance
 }
 
 /// The width of one side cell in a row list `list` px wide (see `render_rows`).
@@ -194,7 +245,11 @@ where
         pill,
         on_expander,
         odd,
+        moved,
     } = c;
+    // With a tag beside it the name keeps its whole width (the tag was only drawn because it
+    // fits): the tag is what gets cut.
+    let tagged = moved.is_some();
     let Some(entry) = entry else {
         let id = if left {
             "folder-missing-left"
@@ -256,6 +311,7 @@ where
                 .test_support()
                 .aria_label(name.clone())
                 .flex_initial()
+                .when(tagged, |d| d.flex_none())
                 .min_w(px(name_min))
                 .truncate()
                 .font(fonts.code.clone())
@@ -265,11 +321,12 @@ where
                 .tooltip(move |window, cx| ld_tip(path.clone(), window, cx))
                 .child(name),
         )
+        .when_some(moved, |d, tag| d.child(moved_tag(tag, p)))
         .when_some(odd, |d, (tip, warn)| {
             let chip = if warn {
-                ld_pill("⚠ invisible", p.del, p.bg_del)
+                ld_pill(tr("⚠ invisible"), p.del, p.bg_del)
             } else {
-                ld_pill("invisible", p.muted, p.panel3)
+                ld_pill(tr("invisible"), p.muted, p.panel3)
             };
             d.child(
                 chip.id((odd_id, row))

@@ -5,8 +5,10 @@
 use duet_core::text::rules::RULES_MAX_BYTES;
 use gpui_kit::Context;
 
+use crate::i18n::{tr, trf};
 use crate::text::job::RULES_SKIPPED;
 use crate::text::model::DisplayRow;
+use crate::text::replace::side_word;
 use crate::text::view::TextView;
 
 /// The line an alignment started from: its side and 0-based file line.
@@ -37,11 +39,13 @@ impl TextView {
         let Some(start) = start else { return };
         self.align = Some(start);
         self.notice = Some(
-            format!(
+            trf(
                 "Click the line on the {} side to align with {} line {} (Esc cancels).",
-                if start.left { "right" } else { "left" },
-                if start.left { "left" } else { "right" },
-                start.line + 1
+                &[
+                    &side_word(!start.left),
+                    &side_word(start.left),
+                    &(start.line + 1),
+                ],
             )
             .into(),
         );
@@ -55,7 +59,7 @@ impl TextView {
             return;
         };
         if left == start.left {
-            self.notice = Some("Click a line on the other side.".into());
+            self.notice = Some(tr("Click a line on the other side.").into());
             cx.notify();
             return;
         }
@@ -70,7 +74,7 @@ impl TextView {
             .and_then(|m| m.aligned_row(row))
             .and_then(|r| if left { r.left } else { r.right });
         let Some(line) = line else {
-            self.notice = Some("That side has no line here.".into());
+            self.notice = Some(tr("That side has no line here.").into());
             cx.notify();
             return;
         };
@@ -91,9 +95,13 @@ impl TextView {
         anchors.sort_by_key(|&(x, _)| x);
         self.recompare(cx);
         self.notice = Some(if too_large {
-            RULES_SKIPPED.into()
+            tr(RULES_SKIPPED).into()
         } else {
-            format!("Aligned left line {} with right line {}.", a + 1, b + 1).into()
+            trf(
+                "Aligned left line {} with right line {}.",
+                &[&(a + 1), &(b + 1)],
+            )
+            .into()
         });
         cx.notify();
     }
@@ -117,7 +125,7 @@ impl TextView {
         }
         self.request.rules.anchors.clear();
         self.recompare(cx);
-        self.notice = Some("Manual alignments cleared.".into());
+        self.notice = Some(tr("Manual alignments cleared.").into());
         cx.notify();
     }
 }

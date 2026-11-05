@@ -37,6 +37,7 @@ fn item(rel: &str, state: ItemState) -> ReportItem {
         similar: false,
         odd_text: [false; 2],
         whole_folder: None,
+        moved_to: None,
     }
 }
 
@@ -60,6 +61,7 @@ fn options() -> ReportOptions {
         mask: true,
         unimportant: true,
         same: false,
+        lang: crate::i18n::Lang::En,
     }
 }
 
@@ -582,4 +584,47 @@ fn the_legend_explains_the_masking() {
 #[test]
 fn the_live_count_says_one_file_not_one_files() {
     assert!(JS.contains(r#"(n===1?" file":" files")"#));
+}
+
+#[test]
+fn the_count_line_is_where_the_thai_script_replaces_it() {
+    assert!(
+        JS.contains(EN_COUNT),
+        "the English count line moved: update EN_COUNT"
+    );
+    assert_eq!(
+        JS.matches("Showing").count(),
+        1,
+        "the count line holds the only English text"
+    );
+    assert!(
+        matches!(js(Lang::En), Cow::Borrowed(script) if script == JS),
+        "English is JS untouched"
+    );
+    let th = js(Lang::Th);
+    assert!(!th.contains(EN_COUNT) && th.contains("toLocaleString(\"en-US\")"));
+}
+
+#[test]
+fn html_one_sided_list_names_the_other_path() {
+    let mut moved = item("a<&.txt", ItemState::LeftOnly);
+    moved.moved_to = Some("new/b<&.txt".to_owned());
+    let page = html(&[moved], None, &options());
+    let note = "Same contents as new/b&lt;&amp;.txt in PRD (moved or renamed)";
+    assert!(page.contains(&format!("\u{b7} {note}\"")), "title");
+    assert!(
+        page.contains(&format!(
+            "<span class=\"sz\" style=\"white-space:normal\">{note}</span>"
+        )),
+        "the note wraps: .sz is nowrap, and a long note would overprint the next column"
+    );
+    // The size beside it keeps the stylesheet's nowrap; only the note is let loose.
+    assert_eq!(page.matches("style=\"white-space:normal\"").count(), 1);
+    assert!(!page.contains("new/b<&.txt"));
+}
+
+#[test]
+fn a_report_without_moves_has_no_note_span() {
+    let page = html(&[item("a.txt", ItemState::LeftOnly)], None, &options());
+    assert!(!page.contains("moved or renamed"));
 }

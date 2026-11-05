@@ -22,6 +22,8 @@ use gpui_kit::{
 };
 
 use super::*;
+use crate::format::count_of;
+use crate::i18n::{tr, tr_key};
 use crate::table::menu::{head_menu, row_menu};
 use crate::ui::drag::follow_drag;
 use crate::ui::fonts::{CODE_SIZE, Fonts, NUMBER_SIZE, SMALL_SIZE, code_advance};
@@ -46,7 +48,7 @@ const SHOWN_CHARS: usize = 300;
 const SAMPLE: usize = 250;
 /// LocalDiff's `scrollColIntoView` counts at least this much room for the cells.
 const MIN_INTO_VIEW: f32 = 200.;
-const NO_ROWS: &str = "No rows match this filter.";
+const NO_ROWS: &str = tr_key("No rows match this filter.");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellMark {
@@ -117,17 +119,19 @@ fn sample_rows(rows: usize) -> impl Iterator<Item = usize> {
 fn head_tip(name: &str, key: bool, only: Option<bool>, diffs: u32) -> String {
     let mut tip = name.to_owned();
     if key {
-        tip.push_str(" (key column)");
+        tip.push_str(tr(" (key column)"));
     }
     match only {
-        Some(true) => tip.push_str("\nOnly on the left: not compared."),
-        Some(false) => tip.push_str("\nOnly on the right: not compared."),
+        Some(true) => tip.push_str(&format!("\n{}", tr("Only on the left: not compared."))),
+        Some(false) => tip.push_str(&format!("\n{}", tr("Only on the right: not compared."))),
         None => {}
     }
     match diffs {
         0 => {}
-        1 => tip.push_str("\n1 cell differs"),
-        n => tip.push_str(&format!("\n{} cells differ", format_size(u64::from(n)))),
+        n => tip.push_str(&format!(
+            "\n{}",
+            count_of(u64::from(n), "cell differs", "cells differ")
+        )),
     }
     tip
 }
@@ -617,7 +621,7 @@ impl Frame<'_> {
         .text_color(color)
         .when(diffs > 0, |d| d.font_weight(FontWeight::BOLD))
         .when(key, |d| {
-            d.child(ld_pill("Key", p.accent_ink, p.accent).mr(px(5.)))
+            d.child(ld_pill(tr("Key"), p.accent_ink, p.accent).mr(px(5.)))
         })
         .child(div().min_w_0().truncate().child(name.clone()))
         .tooltip(move |window, cx| ld_tip(tip.clone(), window, cx))
@@ -901,7 +905,7 @@ impl TableView {
                                             div()
                                                 .id("table-empty")
                                                 .test_support()
-                                                .aria_label(NO_ROWS)
+                                                .aria_label(tr(NO_ROWS))
                                                 .absolute()
                                                 .top_0()
                                                 .left_0()
@@ -910,7 +914,7 @@ impl TableView {
                                                 .font(fonts.ui.clone())
                                                 .text_size(px(UI_SIZE))
                                                 .text_color(p.muted)
-                                                .child(NO_ROWS),
+                                                .prose(tr(NO_ROWS)),
                                         )
                                     }),
                             )

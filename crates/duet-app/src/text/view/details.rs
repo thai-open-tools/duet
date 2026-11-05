@@ -287,7 +287,7 @@ fn line_prefix(model: &TextModel, left: bool, line: usize, max: usize) -> (Cow<'
 
 /// "Left 12", or "Left —" when that side has no line here.
 fn side_label(left: bool, line: Option<u32>) -> String {
-    let name = if left { "Left" } else { "Right" };
+    let name = tr(if left { "Left" } else { "Right" });
     line.map_or(format!("{name} —"), |l| format!("{name} {}", l + 1))
 }
 

@@ -8,9 +8,10 @@ use std::ops::Range;
 use gpui_kit::{ExternalPaths, PathPromptOptions};
 
 use super::*;
+use crate::i18n::{tr, tr_key};
 use crate::pathbar::{ActiveEdit, dropped_files, over_left_half, typed_file};
 
-const NO_CLIPBOARD_TEXT: &str = "The clipboard has no text.";
+const NO_CLIPBOARD_TEXT: &str = tr_key("The clipboard has no text.");
 
 impl TableView {
     /// The side whose path box is being edited.
@@ -177,13 +178,14 @@ impl TableView {
             .and_then(|item| item.text())
             .filter(|text| !text.is_empty())
         else {
-            self.notice = Some(NO_CLIPBOARD_TEXT.into());
+            self.notice = Some(tr(NO_CLIPBOARD_TEXT).into());
             cx.notify();
             return;
         };
         let index = side_index(left);
         self.kept[index] = Some(pasted_kept(left, &text));
         self.pasted[index] = true;
+        self.sheet_picks[index] = None;
         self.start(Mode::Reparse, cx);
     }
 }

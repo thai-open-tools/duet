@@ -40,6 +40,7 @@ pub const START: TopicText = TopicText {
         Block::Bullets(&[
             "The form is also a drop zone: drop files or folders on it, or anywhere on the window. Two items fill both boxes and compare at once; one item fills the box you drop it on. While you drag, the form's border lights up.",
             "The six tiles under the form each start one kind of compare: [Compare files], [Compare folders], [3-way merge], [Compare binary files], [Compare tables] and [Compare pictures].",
+            "The bar at the top of the window, from [Start] to [Table], goes to the tab of that kind you used last. With none open, it starts a new compare, as the tile does.",
             "[Paste text…], beside [Compare], opens two empty sides to type or paste into; you can open files into either side later.",
         ]),
         Block::Heading("Recent"),
@@ -59,6 +60,11 @@ pub const START: TopicText = TopicText {
             "duet LEFT RIGHT compares two files or two folders.",
             "duet --table LEFT RIGHT opens two files as tables.",
             "duet LEFT RIGHT BASE [[OUTPUT]] starts a 3-way merge, and saves the result to OUTPUT when you give one.",
+            "duet --select-left PATH remembers PATH as the left side and exits without opening a window.",
+            "duet --compare-to PATH compares PATH with the remembered left side.",
+            "duet --register-shell adds those two commands to Explorer's right-click menu for this duet.exe.",
+            "duet --unregister-shell removes them again.",
+            "To use duet from git difftool and mergetool, see the git recipe in the README.",
         ]),
     ],
 };
@@ -81,9 +87,10 @@ pub const FOLDER: TopicText = TopicText {
         Block::Para("duet starts with Quick and remembers the last choice."),
         Block::Heading("What you see"),
         Block::Bullets(&[
-            "The chips [All], [Mismatched], [Changed], [Left only], [Right only] and [Same] choose which rows show. [Mismatched] is the changed files plus the one-sided ones.",
+            "The chips [All], [Mismatched], [Changed], [Left only], [Right only], [Same] and [Moved] choose which rows show. [Mismatched] is the changed files plus the one-sided ones.",
             "\"3 files\" on a folder counts the files below it that the chip and the path filter keep: files, not lines. Hover it for the whole folder's breakdown.",
             "[View: tree] switches to a flat list of files that you can sort by any column.",
+            "A left-only and a right-only file with the same bytes are tagged as moved or renamed; click the tag to go to the other file. Only [Content] and [Content by the text compare rules] look for them, and [Find moved files] in [Options] turns it off.",
             "[Legend] explains every symbol; see \"Symbols and colours\".",
         ]),
         Block::Heading("Selecting and opening"),
@@ -229,6 +236,7 @@ pub const REPORT: TopicText = TopicText {
         Block::Bullets(&[
             "Names for A and B, for example IWT and PRD: a reader does not know what \"left\" means. duet remembers them for the folder pair.",
             "A title and a note, for example the change number.",
+            "The report's language, Thai or English: it starts as the program's and need not match it.",
             "The scope: [All items], [As filtered now] or [Selected items only].",
             "[Show each file's differing lines], with the number of context lines. It needs [Content] or the text rules as the criterion.",
             "[Hide values that look like passwords…], recommended before sharing: a value such as password=… is shown as •••••• with a short code, the same code for the same value. It guesses from names, so read the report before it leaves the team.",
@@ -262,6 +270,8 @@ pub const TEXT: TopicText = TopicText {
             "[Wrap] wraps long lines, [Details] shows the whole selected line under the rows, and [Font 12.5] and [Tab 4] set the text size and the tab width.",
             "Thai text looks wrong? Click the encoding in that side's file-name bar (such as UTF-8 · LF) and choose the right one, for example [Thai (windows-874)]. duet usually detects it.",
             "Binary files show a message; [Open in hex] or [Open as text] opens them anyway.",
+            "[Sort keys], beside [Format], shows JSON or YAML with its keys sorted and indented the same, so files that differ only in key order match. Line numbers are those of the sorted text.",
+            "A value written differently, like 1.0 and 1, still shows as different, and the sorted view is read-only.",
         ]),
         Block::Heading("More"),
         Block::Bullets(&[
@@ -349,17 +359,26 @@ pub const PICTURE: TopicText = TopicText {
 };
 
 pub const TABLE: TopicText = TopicText {
-    title: "Tables (CSV, TSV)",
-    keywords: "table csv tsv excel key column delimiter header cell number",
+    title: "Tables (CSV, TSV, Excel)",
+    keywords: "table csv tsv excel xlsx xlsm workbook sheet formula key column delimiter header cell number",
     body: &[
         Block::Para(
-            "duet compares CSV and TSV files cell by cell. It does not open .xlsx files: save the sheet as CSV first, or copy the cells in Excel and paste them with the paste button beside [Open left…] or [Open right…].",
+            "duet compares CSV and TSV files cell by cell, and Excel workbooks (.xlsx and .xlsm), read-only: it never writes a workbook. Each side shows one sheet, chosen with the sheet picker in the toolbar ({Ctrl+PgUp} and {Ctrl+PgDn} for the left side, with {Shift} for the right side). Both sides start on the first sheet whose name they share. .xls and .xlsb files are not read; you can still copy cells in Excel and paste them with the paste button beside [Open left…] or [Open right…].",
+        ),
+        Block::Para(
+            "A cell shows its stored value, not Excel's format: a cell that Excel shows as 25% shows 0.25 here, and dates show as 2024-03-05. Numbers read at 15 significant digits, Excel's own precision, so a result stored as 0.30000000000000004 reads 0.3. A formula compares by the result saved in the file. When both sides are workbooks, a text cell that looks like a number or a date shows with a leading ', like Excel's own notation, so the text 1 differs from the number 1. Beside a CSV file the ' is left off, because a CSV has no cell types. [Compare numbers by value] makes '1 equal 1, in key columns too; a text TRUE or a text date stays text.",
+        ),
+        Block::Para(
+            "A folder compare compares the bytes of two workbooks, and Excel rewrites the file on every save: open the pair as a table to see whether the cells differ. [Export] writes CSV or HTML; saving back to .xlsx is not offered.",
+        ),
+        Block::Para(
+            "A password-protected workbook is refused: remove the password in Excel and save a copy. A very large sheet is cut where duet stops reading, and a notice says so.",
         ),
         Block::Para(
             "Open tables with the [Compare tables] card, [Open as table] in a folder compare, or duet --table LEFT RIGHT.",
         ),
         Block::Bullets(&[
-            "[Delimiter: Auto] detects a comma, tab, semicolon or pipe; choose one to force it.",
+            "[Delimiter: Auto] detects a comma, tab, semicolon or pipe; choose one to force it. It applies to CSV sides only.",
             "[First row is a header]: columns pair by name. Turn it off to pair them by position.",
             "[Key columns]: type a column name or number, for example id or 1,3, to pair rows by key even when their order differs. Leave it empty to pair rows by order.",
             "[Ignore case], [Trim spaces] and [Compare numbers by value], so 1.0 equals 1.",

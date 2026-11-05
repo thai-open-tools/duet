@@ -9,6 +9,7 @@ use duet_core::text::lines::LineIndex;
 use gpui_kit::{Context, SharedString};
 
 use crate::format::count_of;
+use crate::i18n::{tr, tr_key, trf};
 use crate::text::caret::Caret;
 use crate::text::editing::WAIT_NOTICE;
 use crate::text::find::{FindScope, Matcher};
@@ -17,9 +18,9 @@ use crate::text::view::TextView;
 
 /// What a Replace all or Reformat says when the pair changed before its plan landed.
 pub(crate) const REPLACE_STOPPED: &str =
-    "The text changed while replacing, so nothing was replaced. Press Replace all again.";
+    tr_key("The text changed while replacing, so nothing was replaced. Press Replace all again.");
 pub(crate) const REFORMAT_STOPPED: &str =
-    "The text changed while reformatting, so nothing was changed. Press Reformat again.";
+    tr_key("The text changed while reformatting, so nothing was changed. Press Reformat again.");
 
 /// The pair a Replace all or Reformat plan was made from: the buffer versions, the F9 count and
 /// the compare it belongs to. An untouched pair has no buffer versions, so the versions alone
@@ -33,7 +34,7 @@ pub(crate) struct PairStamp {
 
 /// "left" or "right".
 pub(crate) fn side_word(left: bool) -> &'static str {
-    if left { "left" } else { "right" }
+    tr(if left { "left" } else { "right" })
 }
 
 /// What Replace all does to one side: how many matches, and the one edit that makes them
@@ -134,10 +135,10 @@ impl TextView {
             .and_then(|bar| bar.replacing.take())
             .is_some()
         {
-            self.notice = Some(REPLACE_STOPPED.into());
+            self.notice = Some(tr(REPLACE_STOPPED).into());
         }
         if self.reformatting.take().is_some() {
-            self.notice = Some(REFORMAT_STOPPED.into());
+            self.notice = Some(tr(REFORMAT_STOPPED).into());
         }
     }
 
@@ -270,13 +271,13 @@ impl TextView {
             return false;
         };
         if result.error.is_some() {
-            return self.say("Invalid pattern", cx);
+            return self.say(tr("Invalid pattern"), cx);
         }
         let Some(hit) = result.hits.get(bar.current.unwrap_or(0)).cloned() else {
-            return self.say("No matches to replace.", cx);
+            return self.say(tr("No matches to replace."), cx);
         };
         let Ok(matcher) = Matcher::new(&bar.query) else {
-            return self.say("Invalid pattern", cx);
+            return self.say(tr("Invalid pattern"), cx);
         };
         let Some(model) = self.model.as_ref() else {
             return false;
@@ -293,15 +294,15 @@ impl TextView {
         let (Some(current), Some(replaced)) = (current, replaced) else {
             self.run_find(cx);
             return self.say(
-                "The text here changed: the search ran again. Press Replace once more.",
+                tr("The text here changed: the search ran again. Press Replace once more."),
                 cx,
             );
         };
         if replaced == current {
             self.say(
-                format!(
+                trf(
                     "{}, but the replacement changes nothing.",
-                    count_of(1, "match", "matches")
+                    &[&count_of(1, "match", "matches")],
                 ),
                 cx,
             );
@@ -343,10 +344,10 @@ impl TextView {
             return false;
         };
         if bar.query.text.is_empty() {
-            return self.say("No matches to replace.", cx);
+            return self.say(tr("No matches to replace."), cx);
         }
         let Ok(matcher) = Matcher::new(&bar.query) else {
-            return self.say("Invalid pattern", cx);
+            return self.say(tr("Invalid pattern"), cx);
         };
         let scope: FindScope = bar.query.scope;
         if self.refused_while_loading(cx) {
@@ -369,7 +370,7 @@ impl TextView {
         if sides.is_empty() {
             let reason = skipped.into_iter().next().map(|(_, reason)| reason);
             return self.say(
-                reason.unwrap_or_else(|| "There is nothing to replace.".into()),
+                reason.unwrap_or_else(|| tr("There is nothing to replace.").into()),
                 cx,
             );
         }
@@ -423,26 +424,26 @@ impl TextView {
             bar.replacing = None;
         }
         if self.pair_stamp() != Some(stamp) {
-            self.say(REPLACE_STOPPED, cx);
+            self.say(tr(REPLACE_STOPPED), cx);
             return;
         }
         let total: usize = plans.iter().map(|(_, plan)| plan.matches).sum();
         if total == 0 {
-            self.say("No matches to replace.", cx);
+            self.say(tr("No matches to replace."), cx);
             return;
         }
         if plans.iter().all(|(_, plan)| plan.edit.is_none()) {
             self.say(
-                format!(
+                trf(
                     "{}, but the replacement changes nothing.",
-                    count_of(total as u64, "match", "matches")
+                    &[&count_of(total as u64, "match", "matches")],
                 ),
                 cx,
             );
             return;
         }
         if self.job.is_running() {
-            self.say(WAIT_NOTICE, cx);
+            self.say(tr(WAIT_NOTICE), cx);
             return;
         }
         let matches = |side: bool| -> usize {
@@ -462,22 +463,28 @@ impl TextView {
         let (done, failed) = self.apply_plan_edits(edits, cx);
         // A side that could not take its edit is named; the other one's stays (M9).
         let mut said = match failed {
-            None => format!("Replaced {}.", count_of(total as u64, "match", "matches")),
-            Some(side) if done.is_empty() => format!(
-                "Nothing was replaced: the {} side could not be changed.",
-                side_word(side)
+            None => trf(
+                "Replaced {}.",
+                &[&count_of(total as u64, "match", "matches")],
             ),
-            Some(side) => format!(
+            Some(side) if done.is_empty() => trf(
+                "Nothing was replaced: the {} side could not be changed.",
+                &[&side_word(side)],
+            ),
+            Some(side) => trf(
                 "Replaced {} on the {} side only; the {} side could not be changed.",
-                count_of(matches(done[0]) as u64, "match", "matches"),
-                side_word(done[0]),
-                side_word(side)
+                &[
+                    &count_of(matches(done[0]) as u64, "match", "matches"),
+                    &side_word(done[0]),
+                    &side_word(side),
+                ],
             ),
         };
         for (left, reason) in skipped {
-            said.push_str(&format!(
-                " The {} side was skipped: {reason}",
-                if left { "left" } else { "right" }
+            said.push(' ');
+            said.push_str(&trf(
+                "The {} side was skipped: {}",
+                &[&side_word(left), &reason],
             ));
         }
         self.say(said, cx);

@@ -41,7 +41,7 @@ impl TextView {
         self.dragging_overview = false;
         // Typing during the reload went into the old buffers.
         self.drop_buffer_state();
-        if self.notice.as_deref() == Some(WAIT_NOTICE) {
+        if self.notice.as_deref() == Some(tr(WAIT_NOTICE)) {
             self.notice = None;
         }
         let pending = self.pending_filter.take();
@@ -49,6 +49,8 @@ impl TextView {
         match outcome {
             TextOutcome::Ready(model) => {
                 let mut model = *model;
+                // Built on the job's thread: said again here, in the language now in force.
+                model.relabel_notes();
                 let mapped =
                     |doc: &TextDocument| doc.read_only_reason() == Some(ReadOnlyReason::TooLarge);
                 self.mapped = [mapped(model.left()), mapped(model.right())];
@@ -82,11 +84,11 @@ impl TextView {
                 self.menu_row = None;
                 self.caret = None;
                 self.set_message(
-                    if identical {
+                    live(if identical {
                         "Binary files are identical."
                     } else {
                         "Binary files differ."
-                    },
+                    }),
                     BINARY_HINT,
                 );
             }
@@ -97,11 +99,12 @@ impl TextView {
                 self.menu_row = None;
                 self.caret = None;
                 if self.message.is_none() {
-                    self.set_message("Binary files differ.", BINARY_HINT);
+                    self.set_message(live("Binary files differ."), BINARY_HINT);
                 }
-                self.notice = Some(TOO_LARGE_AS_TEXT.into());
+                self.notice = Some(tr(TOO_LARGE_AS_TEXT).into());
             }
-            TextOutcome::Failed(message) => {
+            TextOutcome::Failed(mut message) => {
+                message.relabel();
                 self.model = None;
                 self.menu_row = None;
                 self.caret = None;
@@ -247,11 +250,11 @@ impl TextView {
         let language = self.comment_language();
         if on && !language.has_comments() {
             self.notice = Some(if language == Language::Text {
-                UNKNOWN_TYPE.into()
+                tr(UNKNOWN_TYPE).into()
             } else {
-                format!(
+                trf(
                     "{} files have no comments, so nothing is ignored.",
-                    language.label()
+                    &[&language.label()],
                 )
                 .into()
             });
@@ -270,7 +273,7 @@ impl TextView {
     ) {
         if self.mapped[if left { 0 } else { 1 }] {
             self.notice = Some(
-                "The encoding of a file over 64 MiB can't be changed: it is read straight from disk."
+                tr("The encoding of a file over 64 MiB can't be changed: it is read straight from disk.")
                     .into(),
             );
             cx.notify();
@@ -297,11 +300,34 @@ impl TextView {
     /// The Format button: compare pretty-printed JSON or XML. Not for files over 64 MiB.
     pub fn set_format(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
         if on && self.mapped.contains(&true) {
-            self.notice = Some("Format is not available for files over 64 MiB.".into());
+            self.notice = Some(tr("Format is not available for files over 64 MiB.").into());
             cx.notify();
             return;
         }
         self.reload_guarded(window, cx, move |view| view.request.format = on);
+    }
+
+    /// The Sort keys button: compare JSON or YAML with its keys sorted and indented the same.
+    /// Not for files over 64 MiB.
+    pub fn set_sort_keys(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if on && self.mapped.contains(&true) {
+            self.notice = Some(tr("Sort keys is not available for files over 64 MiB.").into());
+            cx.notify();
+            return;
+        }
+        self.reload_guarded(window, cx, move |view| {
+            view.request.sort_keys = on;
+            // A pin names a line of the text as it was; the sorted text has other lines.
+            view.request.rules.anchors.clear();
+        });
+    }
+
+    /// `set_sort_keys` without the unsaved-edits prompt, for tests that have nothing to save.
+    #[doc(hidden)]
+    pub fn set_sort_keys_for_test(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.request.sort_keys = on;
+        self.request.rules.anchors.clear();
+        self.reload(cx);
     }
 
     /// `set_format` without the unsaved-edits prompt, for tests that have nothing to save.
@@ -336,4 +362,4 @@ impl TextView {
 
 /// `set_ignore_comments` on a file of no known type (`ops:994`).
 const UNKNOWN_TYPE: &str =
-    "This file's type is unknown: pick one under Type so comments can be found.";
+    tr_key("This file's type is unknown: pick one under Type so comments can be found.");

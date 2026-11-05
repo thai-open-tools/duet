@@ -14,16 +14,23 @@ use super::{
     Attention, ItemState, NOT_SCANNED_HINT, ReportContext, ReportItem, ReportOptions, attention,
     count_text, report_counts, sort_items, top_groups,
 };
+use crate::i18n::{tr, tr_key, trf};
 use crate::text::odd::{OddKind, is_odd_after, odd_info};
 
 #[cfg(test)]
 mod tests;
 
-const SHEET_SUMMARY: &str = "Summary";
-const SHEET_FILES: &str = "Files";
-const SHEET_LINES: &str = "Changed lines";
-/// The choices of the Result column (`RPT_REVIEW`).
-const REVIEW: [&str; 4] = ["Passed", "Needs a fix", "To review", "Not relevant"];
+/// The sheets' names are keys: `tr` turns each into the report's language where it is used.
+const SHEET_SUMMARY: &str = tr_key("Summary");
+const SHEET_FILES: &str = tr_key("Files");
+const SHEET_LINES: &str = tr_key("Changed lines");
+/// The choices of the Result column (`RPT_REVIEW`), as keys.
+const REVIEW: [&str; 4] = [
+    tr_key("Passed"),
+    tr_key("Needs a fix"),
+    tr_key("To review"),
+    tr_key("Not relevant"),
+];
 /// Characters a cell keeps; Excel's own limit is 32,767.
 const CELL_MAX: usize = 32_000;
 /// The Files sheet's column widths, in `csv_columns` order (`rptSheetCols`).
@@ -158,7 +165,7 @@ pub fn xl_text(text: &str) -> String {
     });
     if let Some(at) = cut {
         clean.truncate(at);
-        clean.push_str(" …(cut to 32,000 characters)");
+        clean.push_str(tr(" …(cut to 32,000 characters)"));
     }
     let mut out = String::with_capacity(clean.len() + 16);
     for ch in clean.chars() {
@@ -402,8 +409,9 @@ impl Sheet {
             for (at, location) in &self.links {
                 let _ = write!(
                     out,
-                    "<hyperlink ref=\"{at}\" location=\"{}\" display=\"Go to the changed lines\"/>",
-                    xl_text(location)
+                    "<hyperlink ref=\"{at}\" location=\"{}\" display=\"{}\"/>",
+                    xl_text(location),
+                    xl_text(tr("Go to the changed lines"))
                 );
             }
             out.push_str("</hyperlinks>");
@@ -411,6 +419,16 @@ impl Sheet {
         out.push_str("<pageMargins left=\"0.5\" right=\"0.5\" top=\"0.6\" bottom=\"0.6\" header=\"0.3\" footer=\"0.3\"/></worksheet>");
         out
     }
+}
+
+/// A sheet's name as a formula writes it between quotes: a quote inside is doubled.
+fn quoted(name: &str) -> String {
+    name.replace('\'', "''")
+}
+
+/// The choices of the Result column in the report's language.
+fn review_choices() -> Vec<&'static str> {
+    REVIEW.iter().copied().map(tr).collect()
 }
 
 /// "100,000".
@@ -427,6 +445,7 @@ pub fn folder_xlsx(
     options: &ReportOptions,
     context: &ReportContext,
 ) -> Result<Vec<u8>, TooLarge> {
+    let _lang = crate::i18n::scoped(options.lang);
     let names = &options.names;
     let mut sorted = items.to_vec();
     sort_items(&mut sorted);
@@ -441,13 +460,13 @@ pub fn folder_xlsx(
     });
 
     // Changed lines first, so the Files sheet knows the row each file's lines start on.
-    let mut changed = Sheet::new(SHEET_LINES, &[44, 8, 13, 9, 70, 9, 70]);
+    let mut changed = Sheet::new(tr(SHEET_LINES), &[44, 8, 13, 9, 70, 9, 70]);
     let mut first_rows: HashMap<&str, u32> = HashMap::new();
     if let Some(lines) = shown_lines {
         changed_lines(&mut changed, &mut first_rows, &sorted, lines, names);
     }
 
-    let mut files = Sheet::new(SHEET_FILES, &FILE_WIDTHS);
+    let mut files = Sheet::new(tr(SHEET_FILES), &FILE_WIDTHS);
     files.freeze = Some((3, 1));
     files.row(&heads(csv_columns(names)), Some(32));
     for (index, item) in sorted.iter().enumerate() {
@@ -459,8 +478,10 @@ pub fn folder_xlsx(
     files.filter = Some((FILE_WIDTHS.len() - 1, last));
     let result = xl_col(RESULT_COLUMN);
     files.validations.push(format!(
-        "<dataValidation type=\"list\" allowBlank=\"1\" showInputMessage=\"1\" showErrorMessage=\"1\" promptTitle=\"Result\" prompt=\"Pick one from the list\" sqref=\"{result}2:{result}{last}\"><formula1>\"{}\"</formula1></dataValidation>",
-        xl_text(&REVIEW.join(","))
+        "<dataValidation type=\"list\" allowBlank=\"1\" showInputMessage=\"1\" showErrorMessage=\"1\" promptTitle=\"{}\" prompt=\"{}\" sqref=\"{result}2:{result}{last}\"><formula1>\"{}\"</formula1></dataValidation>",
+        xl_text(tr("Result")),
+        xl_text(tr("Pick one from the list")),
+        xl_text(&review_choices().join(","))
     ));
 
     let summary = summary_sheet(
@@ -487,13 +508,13 @@ fn changed_lines<'a>(
 ) {
     sheet.freeze = Some((1, 1));
     let header = heads([
-        "File".to_owned(),
-        "Place".to_owned(),
-        "Kind".to_owned(),
-        format!("Line {}", names[0]),
-        format!("Text {}", names[0]),
-        format!("Line {}", names[1]),
-        format!("Text {}", names[1]),
+        tr("File").to_owned(),
+        tr("Place").to_owned(),
+        tr("Kind").to_owned(),
+        trf("Line {}", &[&names[0]]),
+        trf("Text {}", &[&names[0]]),
+        trf("Line {}", &[&names[1]]),
+        trf("Text {}", &[&names[1]]),
     ]);
     sheet.row(&header, Some(30));
     for item in sorted {
@@ -502,10 +523,10 @@ fn changed_lines<'a>(
         };
         for (at, row) in info.sheet.iter().enumerate() {
             let (kind, style) = match row.kind {
-                SheetKind::Changed => ("Changed".to_owned(), style::M_MOD),
-                SheetKind::LeftOnly => (format!("Only in {}", names[0]), style::M_DEL),
-                SheetKind::RightOnly => (format!("Only in {}", names[1]), style::M_INS),
-                SheetKind::Soft => ("Unimportant".to_owned(), style::M_SOFT),
+                SheetKind::Changed => (tr("Changed").to_owned(), style::M_MOD),
+                SheetKind::LeftOnly => (trf("Only in {}", &[&names[0]]), style::M_DEL),
+                SheetKind::RightOnly => (trf("Only in {}", &[&names[1]]), style::M_INS),
+                SheetKind::Soft => (tr("Unimportant").to_owned(), style::M_SOFT),
             };
             let number = |side: &Option<(u32, String)>| {
                 side.as_ref()
@@ -535,14 +556,16 @@ fn changed_lines<'a>(
     if lines.sheet_cut_files > 0 {
         sheet.row(
             &[text(
-                format!(
+                trf(
                     "… {} no lines here (over {} rows)",
-                    count_text(
-                        lines.sheet_cut_files as u64,
-                        "more file has",
-                        "more files have"
-                    ),
-                    grouped(SHEET_ROWS)
+                    &[
+                        &count_text(
+                            lines.sheet_cut_files as u64,
+                            "more file has",
+                            "more files have",
+                        ),
+                        &grouped(SHEET_ROWS),
+                    ],
                 ),
                 style::MUTED,
             )],
@@ -581,7 +604,7 @@ fn file_cells(data: &RowData, state: ItemState, link: Option<u32>) -> Vec<Option
             } else {
                 style::MONO
             },
-            link: link.map(|row| format!("'{SHEET_LINES}'!A{row}")),
+            link: link.map(|row| format!("'{}'!A{row}", quoted(tr(SHEET_LINES)))),
         }),
         plain(&data.ext),
         text(&data.state, state_style),
@@ -616,19 +639,21 @@ fn summary_sheet(
     let names = &options.names;
     let c = report_counts(items);
     let mismatched = c.mismatched();
-    let mut s = Sheet::new(SHEET_SUMMARY, &[40, 22, 16, 14, 12, 12, 60]);
+    let mut s = Sheet::new(tr(SHEET_SUMMARY), &[40, 22, 16, 14, 12, 12, 60]);
     let title = if options.title.is_empty() {
-        format!("{} compared with {}", names[0], names[1])
+        trf("{} compared with {}", &[&names[0], &names[1]])
     } else {
         options.title.clone()
     };
     s.row(&[text(title, style::TITLE)], Some(24));
     s.row(
         &[text(
-            format!(
+            trf(
                 "Folder compare report — made with duet {} on {}",
-                context.version,
-                context.generated.format("%Y-%m-%d %H:%M")
+                &[
+                    &context.version,
+                    &context.generated.format("%Y-%m-%d %H:%M"),
+                ],
             ),
             style::MUTED,
         )],
@@ -640,13 +665,13 @@ fn summary_sheet(
     s.row(&[], None);
     s.row(
         &heads([
-            "Side",
-            "Name",
-            "Files",
-            "Total size (bytes)",
+            tr("Side"),
+            tr("Name"),
+            tr("Files"),
+            tr("Total size (bytes)"),
             "",
             "",
-            "Path",
+            tr("Path"),
         ]),
         None,
     );
@@ -689,39 +714,40 @@ fn summary_sheet(
         }
     };
     let line_compare = match (lines, &context.rules) {
-        (None, _) => "Contents not read".to_owned(),
+        (None, _) => tr("Contents not read").to_owned(),
         (Some(_), Some(rules)) => rules.clone(),
-        (Some(_), None) => "Every character counts".to_owned(),
+        (Some(_), None) => tr("Every character counts").to_owned(),
     };
     let masking = if options.mask {
         let mut hidden =
-            "Hidden (•••••• + fingerprint: the same fingerprint means the same value)".to_owned();
+            tr("Hidden (•••••• + fingerprint: the same fingerprint means the same value)")
+                .to_owned();
         if let Some(lines) = lines.filter(|lines| lines.masked_lines > 0) {
             hidden.push_str(" — ");
             hidden.push_str(&count_text(lines.masked_lines as u64, "line", "lines"));
         }
         hidden
     } else {
-        "Not hidden".to_owned()
+        tr("Not hidden").to_owned()
     };
     let mut facts = vec![
-        ("Criterion", context.criterion.clone()),
-        ("Scope", context.scope.clone()),
+        (tr("Criterion"), context.criterion.clone()),
+        (tr("Scope"), context.scope.clone()),
         (
-            "Include / exclude",
+            tr("Include / exclude"),
             format!(
                 "{} / {}",
                 or_dash(&context.include),
                 or_dash(&context.exclude)
             ),
         ),
-        ("Line compare", line_compare),
-        ("Hide passwords and keys", masking),
+        (tr("Line compare"), line_compare),
+        (tr("Hide passwords and keys"), masking),
     ];
     if !context.invisible_scan {
         facts.push((
-            "Invisible characters",
-            format!("Not scanned ({NOT_SCANNED_HINT})"),
+            tr("Invisible characters"),
+            trf("Not scanned ({})", &[&tr(NOT_SCANNED_HINT)]),
         ));
     }
     for (label, value) in facts {
@@ -729,22 +755,22 @@ fn summary_sheet(
     }
     s.row(&[], None);
 
-    s.row(&heads(["Status", "Files", "Share"]), None);
+    s.row(&heads([tr("Status"), tr("Files"), tr("Share")]), None);
     for (label, n, look) in [
-        ("Different".to_owned(), c.different, style::ST_DIFF),
-        (format!("Only in {}", names[0]), c.left_only, style::ST_LEFT),
+        (tr("Different").to_owned(), c.different, style::ST_DIFF),
+        (trf("Only in {}", &[&names[0]]), c.left_only, style::ST_LEFT),
         (
-            format!("Only in {}", names[1]),
+            trf("Only in {}", &[&names[1]]),
             c.right_only,
             style::ST_RIGHT,
         ),
-        ("Same".to_owned(), c.same, style::ST_SAME),
+        (tr("Same").to_owned(), c.same, style::ST_SAME),
     ] {
         s.row(&[text(label, look), count(n), share(n, c.total)], None);
     }
     s.row(
         &[
-            text("Total", style::BOLD),
+            text(tr("Total"), style::BOLD),
             int(c.total as u64, style::BOLD),
             share(1, 1),
         ],
@@ -752,7 +778,7 @@ fn summary_sheet(
     );
     s.row(
         &[
-            text("Mismatched (different + one side only)", style::MUTED),
+            text(tr("Mismatched (different + one side only)"), style::MUTED),
             count(mismatched),
             share(mismatched, c.total),
         ],
@@ -762,7 +788,7 @@ fn summary_sheet(
         s.row(
             &[
                 text(
-                    "Of these, differ only in unimportant parts (counted as Same)",
+                    tr("Of these, differ only in unimportant parts (counted as Same)"),
                     style::MUTED,
                 ),
                 count(c.unimportant),
@@ -783,15 +809,15 @@ fn summary_sheet(
         }
         if read > 0 {
             s.row(&[], None);
-            let title = format!(
+            let title = trf(
                 "Differing lines in total ({} read)",
-                count_text(read, "file", "files")
+                &[&count_text(read, "file", "files")],
             );
-            s.row(&heads([title, "Lines".to_owned()]), None);
+            s.row(&heads([title, tr("Lines").to_owned()]), None);
             for (label, n) in [
-                ("Changed".to_owned(), changed),
-                (format!("Only in {}", names[0]), left),
-                (format!("Only in {}", names[1]), right),
+                (tr("Changed").to_owned(), changed),
+                (trf("Only in {}", &[&names[0]]), left),
+                (trf("Only in {}", &[&names[1]]), right),
             ] {
                 s.row(&[text(label, style::DEF), int(n, style::DEF)], None);
             }
@@ -808,7 +834,14 @@ fn summary_sheet(
     }
     if kinds.iter().any(|&n| n > 0) {
         s.row(&[], None);
-        s.row(&heads(["⚠ Needs a closer look", "Files", "Meaning"]), None);
+        s.row(
+            &heads([
+                format!("⚠ {}", tr("Needs a closer look")),
+                tr("Files").to_owned(),
+                tr("Meaning").to_owned(),
+            ]),
+            None,
+        );
         for (kind, &n) in Attention::ALL.iter().zip(&kinds) {
             if n > 0 {
                 s.row(
@@ -823,7 +856,10 @@ fn summary_sheet(
         }
         s.row(
             &[text(
-                "Filter the “Needs a look” column on the “Files” sheet to see the names",
+                trf(
+                    "Filter the “{}” column on the “{}” sheet to see the names",
+                    &[&tr("Needs a look"), &tr(SHEET_FILES)],
+                ),
                 style::MUTED,
             )],
             None,
@@ -840,17 +876,17 @@ fn summary_sheet(
     if groups.len() > 1 {
         s.row(&[], None);
         let header = heads([
-            "Folder".to_owned(),
-            "Different".to_owned(),
-            format!("Only in {}", names[0]),
-            format!("Only in {}", names[1]),
-            "Same".to_owned(),
-            "Total".to_owned(),
+            tr("Folder").to_owned(),
+            tr("Different").to_owned(),
+            trf("Only in {}", &[&names[0]]),
+            trf("Only in {}", &[&names[1]]),
+            tr("Same").to_owned(),
+            tr("Total").to_owned(),
         ]);
         s.row(&header, None);
         for g in &groups {
             let folder = if g.folder.is_empty() {
-                "(top level)"
+                tr("(top level)")
             } else {
                 &g.folder
             };
@@ -869,23 +905,41 @@ fn summary_sheet(
     }
 
     s.row(&[], None);
-    s.row(&heads(["How to use", "", ""]), None);
+    s.row(&heads([tr("How to use"), "", ""]), None);
     let tips = [
-        "The “Files” sheet has one row per file: use the filter buttons in the column titles, for example on “Status” or “Needs a look”".to_owned(),
-        format!(
-            "The yellow columns (Reviewer, Result, Reviewer note) are for the team to fill in; “Result” offers {}",
-            REVIEW.join(", ")
+        trf(
+            "The “{}” sheet has one row per file: use the filter buttons in the column titles, for example on “{}” or “{}”",
+            &[&tr(SHEET_FILES), &tr("Status"), &tr("Needs a look")],
+        ),
+        trf(
+            "The yellow columns ({}, {}, {}) are for the team to fill in; “{}” offers {}",
+            &[
+                &tr("Reviewer"),
+                &tr("Result"),
+                &tr("Reviewer note"),
+                &tr("Result"),
+                &review_choices().join(", "),
+            ],
         ),
         if has_rows {
-            "A blue file name links to its changed lines: click it to go to the “Changed lines” sheet".to_owned()
+            trf(
+                "A blue file name links to its changed lines: click it to go to the “{}” sheet",
+                &[&tr(SHEET_LINES)],
+            )
         } else {
-            "No “Changed lines” sheet was added (you can add it when you export)".to_owned()
+            trf(
+                "No “{}” sheet was added (you can add it when you export)",
+                &[&tr(SHEET_LINES)],
+            )
         },
-        format!(
+        trf(
             "Changed = a line in the same place with different text · Only in {} / Only in {} = a line the other side does not have · [NBSP] / [LRM] = invisible characters",
-            names[0], names[1]
+            &[&names[0], &names[1]],
         ),
-        "Times are the clock of the computer that made the report · “Same” includes files that differ only in EOL or BOM, or in parts set as unimportant".to_owned(),
+        trf(
+            "Times are the clock of the computer that made the report · “{}” includes files that differ only in EOL or BOM, or in parts set as unimportant",
+            &[&tr("Same")],
+        ),
     ];
     for tip in tips {
         s.row(&[text(format!("• {tip}"), style::DEF)], None);
@@ -937,7 +991,7 @@ fn workbook(sheets: &[Sheet], context: &ReportContext) -> Result<Vec<u8>, TooLar
             let _ = write!(
                 defined,
                 "<definedName name=\"_xlnm._FilterDatabase\" localSheetId=\"{at}\" hidden=\"1\">'{}'!$A$1:${}${row}</definedName>",
-                xl_text(sheet.name),
+                xl_text(&quoted(sheet.name)),
                 xl_col(column)
             );
         }

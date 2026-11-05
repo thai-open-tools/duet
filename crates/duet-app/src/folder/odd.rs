@@ -15,6 +15,7 @@ use gpui_kit::{Context, Task};
 use crate::folder::ops::OddStatus;
 use crate::folder::view::FolderView;
 use crate::format::count_of;
+use crate::i18n::{tr, trf};
 use crate::job::JobSlot;
 
 /// A compare of more files than this does not scan by itself (PF3).
@@ -154,26 +155,27 @@ pub fn odd_tip(scan: &OddScan) -> String {
         "invisible character",
         "invisible characters",
     );
-    let mut tip = format!(
-        "{what}: {} in the text or values · {} in comments or indentation",
-        scan.warn, scan.info
+    let mut tip = trf(
+        "{}: {} in the text or values · {} in comments or indentation",
+        &[&what, &scan.warn, &scan.info],
     );
     if let Some(hit) = scan.hits.first() {
         let place = match hit.place {
-            OddPlace::Comment => "comment",
-            OddPlace::Indent => "indentation",
-            OddPlace::Text => "text or value",
+            OddPlace::Comment => tr("comment"),
+            OddPlace::Indent => tr("indentation"),
+            OddPlace::Text => tr("text or value"),
         };
-        tip.push_str(&format!(
-            "\nFirst: line {}, {} ({place})",
-            hit.line + 1,
-            odd_info(hit.ch).1
+        tip.push('\n');
+        tip.push_str(&trf(
+            "First: line {}, {} ({})",
+            &[&(hit.line + 1), &odd_info(hit.ch).1, &place],
         ));
     }
+    tip.push('\n');
     tip.push_str(if scan.warn > 0 {
-        "\nThey can make a value wrong even though it looks right. Open the file and use the button in the status bar to visit each one."
+        tr("They can make a value wrong even though it looks right. Open the file and use the button in the status bar to visit each one.")
     } else {
-        "\nThey are only in comments or indentation and change no value."
+        tr("They are only in comments or indentation and change no value.")
     });
     tip
 }

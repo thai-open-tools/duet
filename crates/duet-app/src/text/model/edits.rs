@@ -3,6 +3,7 @@
 use std::ops::Range;
 
 use super::TextModel;
+use crate::i18n::tr;
 
 impl TextModel {
     /// The one edit that moves line `from` of one side to just before line `to` (0..=line_count;
@@ -17,11 +18,11 @@ impl TextModel {
         self.editable(left)?;
         let count = self.line_count(left) as u32;
         if from >= count {
-            return Err("That line is gone.".into());
+            return Err(tr("That line is gone.").into());
         }
         let to = to.min(count);
         if to == from || to == from + 1 {
-            return Err("The line is there already.".into());
+            return Err(tr("The line is there already.").into());
         }
         self.begin_edit(left)?;
         // The lines the move shuffles: `first..last`, the moved one at one end.

@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// Why a side is not coloured. A key: the tooltip draws it with `tr`.
+pub(crate) const PLAIN_TEXT: &str = tr_key("plain text");
+pub(crate) const TURNED_OFF: &str = tr_key("turned off");
+pub(crate) const OVER_LIMIT: &str = tr_key("over 10 MiB");
+
 /// How long a lexed side waits after the last edit before it is lexed again (PF10).
 const RELEX_DELAY: Duration = Duration::from_millis(150);
 
@@ -39,15 +44,15 @@ impl TextView {
         // This parse takes the place of a lex still waiting for a pause.
         self.relex[index] = None;
         let state = match &self.model {
-            None => SyntaxState::Off("plain text"),
-            Some(_) if !self.syntax_on => SyntaxState::Off("turned off"),
+            None => SyntaxState::Off(PLAIN_TEXT),
+            Some(_) if !self.syntax_on => SyntaxState::Off(TURNED_OFF),
             Some(model) => {
                 let doc = if left { model.left() } else { model.right() };
                 let len = model
                     .buffer(left)
                     .map_or(doc.bytes().len(), |buffer| buffer.len());
                 if len > MAX_SYNTAX_BYTES || doc.text().is_none() {
-                    SyntaxState::Off("over 10 MiB")
+                    SyntaxState::Off(OVER_LIMIT)
                 } else if let choice @ (SyntaxChoice::Tree(_) | SyntaxChoice::Lex(_)) =
                     syntax_choice(doc.path(), self.language)
                 {
@@ -75,7 +80,7 @@ impl TextView {
                     .detach();
                     SyntaxState::Parsing
                 } else {
-                    SyntaxState::Off("plain text")
+                    SyntaxState::Off(PLAIN_TEXT)
                 }
             }
         };

@@ -19,6 +19,7 @@ use gpui_kit::{
     prelude::*, px,
 };
 
+use crate::i18n::{tr, trf};
 use crate::palette::Palette;
 use crate::text::view::TextView;
 use crate::ui::fonts::SMALL_SIZE;
@@ -236,10 +237,12 @@ impl TextView {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let side = if left { "left" } else { "right" };
+            let side = tr(if left { "left" } else { "right" });
             Some(match change {
-                DiskChange::Changed => format!("⚠ {name} ({side}) was changed by another program."),
-                DiskChange::Gone => format!("⚠ {name} ({side}) was deleted or moved."),
+                DiskChange::Changed => {
+                    trf("⚠ {} ({}) was changed by another program.", &[&name, &side])
+                }
+                DiskChange::Gone => trf("⚠ {} ({}) was deleted or moved.", &[&name, &side]),
             })
         })
     }
@@ -288,13 +291,13 @@ impl TextView {
                 .border_color(p.line)
                 .text_size(px(SMALL_SIZE))
                 .child(div().text_color(p.modified).child(text))
-                .child(ld_button("text-disk-reload", "Reload", p).ld_click(
+                .child(ld_button("text-disk-reload", tr("Reload"), p).ld_click(
                     true,
                     cx.listener(|this, _, window: &mut Window, cx| {
                         this.reload_guarded(window, cx, |_| {})
                     }),
                 ))
-                .child(ld_button("text-disk-ignore", "Ignore", p).ld_click(
+                .child(ld_button("text-disk-ignore", tr("Ignore"), p).ld_click(
                     true,
                     cx.listener(|this, _, _, cx| this.ignore_disk_change(cx)),
                 ))

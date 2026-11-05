@@ -3,6 +3,7 @@
 use gpui_kit::Background;
 
 use super::*;
+use crate::i18n::tr;
 use crate::ui::icons;
 use rows::{LineWidths, RowMetrics};
 
@@ -70,10 +71,11 @@ impl TextView {
                 let c = stage_columns(list_width + OVERVIEW_WIDTH);
                 c.left.end - c.left.start
             }),
-            // A copy arrow only points at a side that can take the copy; the formatted view and
-            // files over 64 MiB cannot. Alt+arrow still says why.
-            to_left: model.editable(true).is_ok(),
-            to_right: model.editable(false).is_ok(),
+            // A copy arrow only points at a side that can take the copy, from a side that shows
+            // its own text; the formatted and the sorted view and files over 64 MiB cannot.
+            // Alt+arrow still says why.
+            to_left: model.can_copy_to(true),
+            to_right: model.can_copy_to(false),
         };
         self.rows_built += range.len();
         let rows = range.map(|i| row(&ctx, model, i, cx)).collect();
@@ -270,7 +272,7 @@ fn row(
                             ld_gutter_button(
                                 ("copy-right", block),
                                 icons::TO_RIGHT,
-                                "Copy block to the right (Alt+→)",
+                                tr("Copy block to the right (Alt+→)"),
                                 current,
                                 palette,
                             )
@@ -287,7 +289,7 @@ fn row(
                             ld_gutter_button(
                                 ("copy-left", block),
                                 icons::TO_LEFT,
-                                "Copy block to the left (Alt+←)",
+                                tr("Copy block to the left (Alt+←)"),
                                 current,
                                 palette,
                             )

@@ -4,7 +4,9 @@
 use duet_core::text::document::TextDocument;
 use duet_core::text::lines::EolStyle;
 
-const CRLF_SCRIPT: &str = "A CRLF script won't run on Linux: pick LF under On save";
+use crate::i18n::{tr, tr_key, trf};
+
+const CRLF_SCRIPT: &str = tr_key("A CRLF script won't run on Linux: pick LF under On save");
 const SCRIPT_EXTENSIONS: [&str; 6] = [".sh", ".ksh", ".bash", ".zsh", ".py", ".pl"];
 
 /// The one line-ending style a side has; None for no breaks or a mix.
@@ -19,8 +21,11 @@ fn style(doc: &TextDocument) -> Option<&'static str> {
 
 fn encoding_name(doc: &TextDocument) -> String {
     let encoding = doc.encoding();
-    let bom = if encoding.bom { " with BOM" } else { "" };
-    format!("{}{bom}", encoding.encoding.name())
+    if encoding.bom {
+        trf("{} with BOM", &[&encoding.encoding.name()])
+    } else {
+        encoding.encoding.name().to_owned()
+    }
 }
 
 /// The side ends with a line break, read from its bytes.
@@ -45,29 +50,30 @@ pub fn file_warnings(left: &TextDocument, right: &TextDocument) -> Vec<String> {
         && a != b
         && both_have_lines
     {
-        warnings.push(format!("Line endings differ ({a} / {b})"));
+        warnings.push(trf("Line endings differ ({} / {})", &[&a, &b]));
     }
     let (mixed_left, mixed_right) = (
         left.eol() == EolStyle::Mixed,
         right.eol() == EolStyle::Mixed,
     );
     if mixed_left || mixed_right {
-        let where_ = match (mixed_left, mixed_right) {
-            (true, true) => "on both sides",
-            (true, false) => "on the left",
-            _ => "on the right",
-        };
-        warnings.push(format!("Mixed line endings {where_}"));
+        warnings.push(
+            match (mixed_left, mixed_right) {
+                (true, true) => tr("Mixed line endings on both sides"),
+                (true, false) => tr("Mixed line endings on the left"),
+                _ => tr("Mixed line endings on the right"),
+            }
+            .to_owned(),
+        );
     }
     if left.encoding() != right.encoding() {
-        warnings.push(format!(
+        warnings.push(trf(
             "Encodings differ ({} / {})",
-            encoding_name(left),
-            encoding_name(right)
+            &[&encoding_name(left), &encoding_name(right)],
         ));
     }
     if both_have_lines && ends_with_newline(left) != ends_with_newline(right) {
-        warnings.push("Final newline differs".to_owned());
+        warnings.push(tr("Final newline differs").to_owned());
     }
     let crlf_script = |doc: &TextDocument| {
         is_script(doc)
@@ -75,7 +81,7 @@ pub fn file_warnings(left: &TextDocument, right: &TextDocument) -> Vec<String> {
             && doc.line_count() > 1
     };
     if crlf_script(left) || crlf_script(right) {
-        warnings.push(CRLF_SCRIPT.to_owned());
+        warnings.push(tr(CRLF_SCRIPT).to_owned());
     }
     warnings
 }

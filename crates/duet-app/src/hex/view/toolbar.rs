@@ -3,10 +3,11 @@
 
 use gpui_kit::FontWeight;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::input::Input;
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::DropdownMenu as _;
 
 use super::*;
+use crate::i18n::{tr, trf};
+use crate::ui::edit_menu::ld_input;
 use crate::ui::fonts::{Fonts, UI_SIZE};
 use crate::ui::icons;
 use crate::ui::style::{
@@ -39,26 +40,31 @@ impl HexView {
             nav(
                 "hex-first",
                 icons::FIRST,
-                "First difference (Ctrl+Home)",
+                tr("First difference (Ctrl+Home)"),
                 Nav::First,
             ),
             nav(
                 "hex-prev",
                 icons::PREV,
-                "Previous difference (F7)",
+                tr("Previous difference (F7)"),
                 Nav::Prev,
             ),
-            nav("hex-next", icons::NEXT, "Next difference (F8)", Nav::Next),
+            nav(
+                "hex-next",
+                icons::NEXT,
+                tr("Next difference (F8)"),
+                Nav::Next,
+            ),
             nav(
                 "hex-last",
                 icons::LAST,
-                "Last difference (Ctrl+End)",
+                tr("Last difference (Ctrl+End)"),
                 Nav::Last,
             ),
         );
         let (all, differences) = (
-            filter("hex-filter-all", "All", false, false),
-            filter("hex-filter-diff", "Differences only", true, true),
+            filter("hex-filter-all", tr("All"), false, false),
+            filter("hex-filter-diff", tr("Differences only"), true, true),
         );
         h_flex()
             .id("hex-toolbar")
@@ -99,11 +105,11 @@ impl HexView {
             .child(last)
             .child(ld_separator(p))
             .child(
-                ld_icon_button("hex-swap", icons::SWAP, "Swap sides (F9)", p)
+                ld_icon_button("hex-swap", icons::SWAP, tr("Swap sides (F9)"), p)
                     .ld_click(true, cx.listener(|this, _, _, cx| this.swap_sides(cx))),
             )
             .child(
-                ld_icon_button("hex-reload", icons::RELOAD, "Reload (F5)", p)
+                ld_icon_button("hex-reload", icons::RELOAD, tr("Reload (F5)"), p)
                     .ld_click(true, cx.listener(|this, _, _, cx| this.reload(cx))),
             )
             .child(ld_separator(p))
@@ -115,11 +121,11 @@ impl HexView {
                     .id("hex-goto")
                     .test_support()
                     .w(px(190.))
-                    .child(Input::new(&self.goto).aria_label("Go to offset")),
+                    .child(ld_input(&self.goto).aria_label(tr("Go to offset"))),
             )
             .child(
-                ld_button("hex-goto-go", "Go to", p)
-                    .ld_tooltip("Go to the offset (Enter)")
+                ld_button("hex-goto-go", tr("Go to"), p)
+                    .ld_tooltip(tr("Go to the offset (Enter)"))
                     .ld_click(
                         ready,
                         cx.listener(|this, _, window, cx| this.submit_goto(window, cx)),
@@ -127,16 +133,16 @@ impl HexView {
             )
             .child(div().flex_1())
             .child(
-                ld_button("hex-find", "Find…", p)
-                    .ld_tooltip("Find (Ctrl+F)")
+                ld_button("hex-find", tr("Find…"), p)
+                    .ld_tooltip(tr("Find (Ctrl+F)"))
                     .ld_click(
                         ready,
                         cx.listener(|this, _, window, cx| this.open_find(window, cx)),
                     ),
             )
             .child(
-                ld_button("hex-copy", "Copy hex", p)
-                    .ld_tooltip("Copy hex (Ctrl+C)")
+                ld_button("hex-copy", tr("Copy hex"), p)
+                    .ld_tooltip(tr("Copy hex (Ctrl+C)"))
                     .ld_click(ready, cx.listener(|this, _, _, cx| this.copy_hex(cx))),
             )
     }
@@ -145,12 +151,12 @@ impl HexView {
     fn bytes_per_row_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let chosen = self.bytes_per_row;
         let this = cx.entity().downgrade();
-        ld_dropdown("hex-bpr", format!("Bytes per row: {chosen}"), UI_SIZE).dropdown_menu(
+        ld_dropdown("hex-bpr", trf("Bytes per row: {}", &[&chosen]), UI_SIZE).dropdown_menu(
             move |menu, _, _| {
                 BYTES_PER_ROW.iter().fold(menu, |menu, &bpr| {
                     let this = this.clone();
                     menu.item(
-                        PopupMenuItem::new(bpr.to_string())
+                        crate::ui::menu::row(bpr.to_string())
                             .checked(chosen == bpr)
                             .on_click(move |_, _, cx| {
                                 let _ = this.update(cx, |view, cx| view.set_bytes_per_row(bpr, cx));

@@ -22,11 +22,13 @@ use crate::text::view::{
     SelectRight, SelectUp, SelectWordLeft, SelectWordRight, TextView, Undo, WordLeft, WordRight,
 };
 
+use crate::i18n::{tr, tr_key};
+
 /// How long the re-diff waits after the last edit.
 const REDIFF_DELAY: Duration = Duration::from_millis(150);
 
 /// Why an edit did nothing while a compare runs.
-pub(crate) const WAIT_NOTICE: &str = "Wait for the compare to finish.";
+pub(crate) const WAIT_NOTICE: &str = tr_key("Wait for the compare to finish.");
 
 /// Per-keystroke UI-thread times from the typing probe, in milliseconds.
 #[derive(Debug, Default)]
@@ -498,7 +500,7 @@ impl TextView {
         let model = self
             .model
             .as_mut()
-            .ok_or_else(|| String::from("Nothing is loaded."))?;
+            .ok_or_else(|| String::from(tr("Nothing is loaded.")))?;
         let change = model.replace(left, range, text)?;
         self.line_widths.borrow_mut().edited(left, &change);
         self.drop_stale_anchors();
@@ -526,7 +528,7 @@ impl TextView {
         if !self.job.is_running() {
             return false;
         }
-        self.notice = Some(WAIT_NOTICE.into());
+        self.notice = Some(tr(WAIT_NOTICE).into());
         cx.notify();
         true
     }
@@ -579,7 +581,7 @@ impl TextView {
                 self.copy_block(block, to_left, cx);
             }
             None => {
-                self.notice = Some("Pick a difference first (F7/F8).".into());
+                self.notice = Some(tr("Pick a difference first (F7/F8).").into());
                 cx.notify();
             }
         }
@@ -742,7 +744,7 @@ impl TextView {
     fn forget_history(&mut self, cx: &mut Context<Self>) {
         self.undo.clear();
         self.notice =
-            Some("The text changed since that edit, so the undo history was cleared.".into());
+            Some(tr("The text changed since that edit, so the undo history was cleared.").into());
         cx.notify();
     }
 

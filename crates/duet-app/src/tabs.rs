@@ -3,14 +3,21 @@
 use std::path::{Path, PathBuf};
 
 use crate::format::format_size;
+use crate::i18n::{tr, trf};
 
 /// A tab's badge: "ok" for an identical pair, otherwise how many differences.
 pub fn badge_text(count: usize) -> String {
     if count == 0 {
-        "ok".to_owned()
+        tr("ok").to_owned()
     } else {
         format_size(count as u64)
     }
+}
+
+/// Whether `badge` says the pair is identical, which draws it green: the text `badge_text(0)`
+/// gives in the language in force.
+pub fn is_ok_badge(badge: &str) -> bool {
+    badge == badge_text(0)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +57,7 @@ impl TabKey {
     pub fn title(&self) -> String {
         let name = |path: &PathBuf| {
             if path.as_os_str().is_empty() {
-                return "untitled".to_owned();
+                return tr("untitled").to_owned();
             }
             path.file_name().map_or_else(
                 || path.display().to_string(),
@@ -58,8 +65,8 @@ impl TabKey {
             )
         };
         match self {
-            TabKey::Start(_) => "Start".into(),
-            TabKey::Help => "Help".into(),
+            TabKey::Start(_) => tr("Start").into(),
+            TabKey::Help => tr("Help").into(),
             TabKey::Folders(l, r)
             | TabKey::Files(l, r)
             | TabKey::Hex(l, r)
@@ -69,7 +76,7 @@ impl TabKey {
             }
             TabKey::Merge(l, b, r, _) => {
                 if [l, b, r].iter().all(|p| p.as_os_str().is_empty()) {
-                    return "3-way merge".into();
+                    return tr("3-way merge").into();
                 }
                 let side = |path: &PathBuf| {
                     if path.as_os_str().is_empty() {
@@ -78,15 +85,68 @@ impl TabKey {
                         name(path)
                     }
                 };
-                format!("Merge: {} ↔ {}", side(l), side(r))
+                trf("Merge: {} ↔ {}", &[&side(l), &side(r)])
             }
         }
+    }
+}
+
+/// What a tab compares: the header's bar goes to the latest tab of each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Start,
+    Text,
+    Folders,
+    Merge,
+    Hex,
+    Picture,
+    Table,
+}
+
+impl Mode {
+    /// In the order of the bar.
+    pub const ALL: [Mode; 7] = [
+        Mode::Start,
+        Mode::Text,
+        Mode::Folders,
+        Mode::Merge,
+        Mode::Hex,
+        Mode::Picture,
+        Mode::Table,
+    ];
+
+    /// The mode of a tab; the Help tab has none.
+    pub fn of(key: &TabKey) -> Option<Mode> {
+        match key {
+            TabKey::Start(_) => Some(Mode::Start),
+            TabKey::Files(..) => Some(Mode::Text),
+            TabKey::Folders(..) => Some(Mode::Folders),
+            TabKey::Merge(..) => Some(Mode::Merge),
+            TabKey::Hex(..) => Some(Mode::Hex),
+            TabKey::Picture(..) => Some(Mode::Picture),
+            TabKey::Table(..) => Some(Mode::Table),
+            TabKey::Help => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        tr(match self {
+            Mode::Start => "Start",
+            Mode::Text => "Text",
+            Mode::Folders => "Folders",
+            Mode::Merge => "3-way merge",
+            Mode::Hex => "Hex",
+            Mode::Picture => "Picture",
+            Mode::Table => "Table",
+        })
     }
 }
 
 pub struct TabSet<T> {
     tabs: Vec<(TabKey, T)>,
     active: Option<usize>,
+    /// The open tabs by when they were last active, latest last.
+    used: Vec<TabKey>,
 }
 
 impl<T> Default for TabSet<T> {
@@ -94,6 +154,7 @@ impl<T> Default for TabSet<T> {
         Self {
             tabs: Vec::new(),
             active: None,
+            used: Vec::new(),
         }
     }
 }
@@ -115,6 +176,26 @@ impl<T> TabSet<T> {
         self.active.map(|i| &self.tabs[i].1)
     }
 
+    /// The mode of the active tab; None with no tab or on the Help tab.
+    pub fn active_mode(&self) -> Option<Mode> {
+        self.active.and_then(|i| Mode::of(&self.tabs[i].0))
+    }
+
+    /// The tab of `mode` that was active last.
+    pub fn latest(&self, mode: Mode) -> Option<usize> {
+        let key = self.used.iter().rev().find(|k| Mode::of(k) == Some(mode))?;
+        self.find(key)
+    }
+
+    /// Notes that the active tab is now the one used last.
+    fn note_used(&mut self) {
+        if let Some(index) = self.active {
+            let key = self.tabs[index].0.clone();
+            self.used.retain(|k| *k != key);
+            self.used.push(key);
+        }
+    }
+
     pub fn find(&self, key: &TabKey) -> Option<usize> {
         self.tabs.iter().position(|(k, _)| k == key)
     }
@@ -126,12 +207,14 @@ impl<T> TabSet<T> {
             self.tabs.len() - 1
         });
         self.active = Some(index);
+        self.note_used();
         index
     }
 
     pub fn activate(&mut self, index: usize) {
         if index < self.tabs.len() {
             self.active = Some(index);
+            self.note_used();
         }
     }
 
@@ -141,19 +224,24 @@ impl<T> TabSet<T> {
         if index >= self.tabs.len() {
             return None;
         }
-        let (_, item) = self.tabs.remove(index);
+        let (key, item) = self.tabs.remove(index);
+        self.used.retain(|k| *k != key);
         self.active = match self.active {
             _ if self.tabs.is_empty() => None,
             Some(active) if active > index => Some(active - 1),
             Some(active) => Some(active.min(self.tabs.len() - 1)),
             None => None,
         };
+        self.note_used();
         Some(item)
     }
 
     /// Gives tab `index` a new key (after a swap); its item and position stay.
     pub fn rekey(&mut self, index: usize, key: TabKey) {
         if let Some(tab) = self.tabs.get_mut(index) {
+            if let Some(used) = self.used.iter_mut().find(|k| **k == tab.0) {
+                *used = key.clone();
+            }
             tab.0 = key;
         }
     }
@@ -161,6 +249,7 @@ impl<T> TabSet<T> {
     pub fn next(&mut self) {
         if !self.tabs.is_empty() {
             self.active = Some(self.active.map_or(0, |i| (i + 1) % self.tabs.len()));
+            self.note_used();
         }
     }
 
@@ -178,6 +267,76 @@ mod tests {
 
     fn files(a: &str, b: &str) -> TabKey {
         TabKey::Files(PathBuf::from(a), PathBuf::from(b))
+    }
+
+    #[test]
+    fn the_latest_tab_of_a_mode_is_the_one_used_last() {
+        let mut tabs = TabSet::default();
+        tabs.open(files("a", "b"), || 0);
+        tabs.open(files("c", "d"), || 1);
+        tabs.open(TabKey::Start(0), || 2);
+        assert_eq!(tabs.latest(Mode::Text), Some(1));
+        tabs.activate(0);
+        assert_eq!(tabs.latest(Mode::Text), Some(0));
+        assert_eq!(tabs.latest(Mode::Hex), None);
+        assert_eq!(tabs.active_mode(), Some(Mode::Text));
+
+        tabs.activate(1);
+        tabs.close(1);
+        assert_eq!(
+            tabs.latest(Mode::Text),
+            Some(0),
+            "a closed tab is forgotten"
+        );
+        assert_eq!(tabs.latest(Mode::Start), Some(1), "and the rest renumber");
+
+        tabs.rekey(0, files("x", "y"));
+        assert_eq!(tabs.latest(Mode::Text), Some(0), "a swap keeps its place");
+        tabs.next();
+        assert_eq!(
+            tabs.active_mode(),
+            Some(Mode::Text),
+            "next wraps to the first tab"
+        );
+    }
+
+    #[test]
+    fn each_tab_has_its_mode_and_help_has_none() {
+        let path = || PathBuf::from("a");
+        assert_eq!(Mode::of(&TabKey::Start(3)), Some(Mode::Start));
+        assert_eq!(Mode::of(&TabKey::Files(path(), path())), Some(Mode::Text));
+        assert_eq!(
+            Mode::of(&TabKey::Folders(path(), path())),
+            Some(Mode::Folders)
+        );
+        assert_eq!(Mode::of(&TabKey::Hex(path(), path())), Some(Mode::Hex));
+        assert_eq!(Mode::of(&TabKey::Table(path(), path())), Some(Mode::Table));
+        assert_eq!(
+            Mode::of(&TabKey::Picture(path(), path())),
+            Some(Mode::Picture)
+        );
+        assert_eq!(
+            Mode::of(&TabKey::Merge(path(), path(), path(), 0)),
+            Some(Mode::Merge)
+        );
+        assert_eq!(Mode::of(&TabKey::Help), None);
+    }
+
+    #[test]
+    fn the_modes_are_named_in_the_chosen_language() {
+        let _thai = crate::i18n::scoped(crate::i18n::Lang::Th);
+        assert_eq!(
+            Mode::ALL.map(Mode::label),
+            [
+                "เริ่มต้น",
+                "ข้อความ",
+                "โฟลเดอร์",
+                "รวมสามทาง",
+                "Hex",
+                "รูปภาพ",
+                "ตาราง"
+            ]
+        );
     }
 
     #[test]

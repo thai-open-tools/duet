@@ -26,6 +26,9 @@ resvg.workspace = true
 regex.workspace = true
 crc32fast.workspace = true
 chrono.workspace = true
+granit-parser.workspace = true
+calamine.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

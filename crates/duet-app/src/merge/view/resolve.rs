@@ -4,18 +4,18 @@
 
 use duet_core::text::merge::session::How;
 use gpui_kit::component::h_flex;
-use gpui_kit::component::input::Textarea;
 use gpui_kit::{AnyElement, ClickEvent, Div, FontWeight};
 
 use super::*;
 use crate::merge::items::{count_text, field_placeholder, field_rows, field_value, state_text};
+use crate::ui::edit_menu::ld_textarea;
 use crate::ui::fonts::{CODE_SIZE, Fonts};
 use crate::ui::icons;
 use crate::ui::style::{LdExt as _, ld_button, ld_small_icon_button};
 
-const CHOOSE_FIRST: &str = "Choose a part first: press F8 to go to the next conflict.";
-const NOTHING_TO_UNDO: &str = "Nothing to undo.";
-const NOTHING_TO_REDO: &str = "Nothing to redo.";
+const CHOOSE_FIRST: &str = tr_key("Choose a part first: press F8 to go to the next conflict.");
+const NOTHING_TO_UNDO: &str = tr_key("Nothing to undo.");
+const NOTHING_TO_REDO: &str = tr_key("Nothing to redo.");
 
 /// The choice buttons' ids, in `How::CHOICES` order.
 const CHOICE_IDS: [&str; 5] = [
@@ -86,17 +86,16 @@ impl MergeView {
         let no_conflicts = session.conflicts().is_empty();
         let resolved = session.resolve_all(how);
         let notice = if resolved > 0 {
-            let side = match how {
-                How::Left => " with the left side",
-                How::Right => " with the right side",
-                _ => "",
-            };
             let count = count_of(resolved as u64, "conflict", "conflicts");
-            format!("Resolved {count}{side}.")
+            match how {
+                How::Left => trf("Resolved {} with the left side.", &[&count]),
+                How::Right => trf("Resolved {} with the right side.", &[&count]),
+                _ => trf("Resolved {}.", &[&count]),
+            }
         } else if no_conflicts {
-            "No conflicts.".to_owned()
+            tr("No conflicts.").to_owned()
         } else {
-            "No unresolved conflicts left.".to_owned()
+            tr("No unresolved conflicts left.").to_owned()
         };
         self.notice = Some(notice.into());
         if resolved > 0 {
@@ -131,7 +130,7 @@ impl MergeView {
                 } else {
                     NOTHING_TO_UNDO
                 };
-                self.notice = Some(nothing.into());
+                self.notice = Some(tr(nothing).into());
             }
             Some(chunks) => {
                 self.notice = None;
@@ -170,7 +169,7 @@ impl MergeView {
             return;
         };
         let Some(chunk) = session.current() else {
-            self.notice = Some(CHOOSE_FIRST.into());
+            self.notice = Some(tr(CHOOSE_FIRST).into());
             cx.notify();
             return;
         };
@@ -338,6 +337,20 @@ impl MergeView {
         cx.notify();
     }
 
+    /// The placeholder of every result field made so far, in the current language. The text in a
+    /// field is the person's, and stays.
+    pub(super) fn relabel_result_fields(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        for (chunk, field) in self.fields_made() {
+            let resolved = session.resolution(chunk).is_some();
+            field.update(cx, |field, cx| {
+                field.set_placeholder(field_placeholder(resolved), window, cx)
+            });
+        }
+    }
+
     /// The text in the result field of `chunk`, once its card was drawn.
     pub fn field_text(&self, chunk: usize, cx: &App) -> Option<String> {
         self.field(chunk)
@@ -369,10 +382,10 @@ impl MergeView {
             .into_iter()
             .zip(CHOICE_IDS)
             .map(|(choice, id)| {
-                ld_button((id, chunk), choice.label(), p)
+                ld_button((id, chunk), tr(choice.label()), p)
                     .ld_small()
                     .ld_on(how == Some(choice), p)
-                    .ld_tooltip(choice.tip())
+                    .ld_tooltip(tr(choice.tip()))
                     .ld_click(
                         true,
                         cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -394,14 +407,14 @@ impl MergeView {
                     .mr(px(4.))
                     .text_size(px(12.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("Result"),
+                    .child(tr("Result")),
             )
             .children(choices)
             .child(
                 ld_small_icon_button(
                     ("merge-reset", chunk),
                     icons::RESET,
-                    "Reset this part to its default",
+                    tr("Reset this part to its default"),
                     p,
                 )
                 .ld_click(
@@ -426,7 +439,7 @@ impl MergeView {
                 div()
                     .text_size(px(11.))
                     .text_color(p.dim)
-                    .child("Typing here = edited"),
+                    .child(tr("Typing here = edited")),
             )
     }
 
@@ -467,7 +480,7 @@ impl MergeView {
                         d.bg(p.bg_del).border_color(p.del).border_dashed()
                     })
                     .child(
-                        Textarea::new(field)
+                        ld_textarea(field)
                             .appearance(false)
                             .text_size(px(CODE_SIZE)),
                     ),

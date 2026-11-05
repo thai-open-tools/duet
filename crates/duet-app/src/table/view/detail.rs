@@ -12,11 +12,15 @@ use gpui_kit::{AnyElement, FontWeight, HighlightStyle, Hsla, StyledText};
 use unicode_segmentation::GraphemeCursor;
 
 use super::*;
+use crate::format::count_of;
+use crate::i18n::{tr, tr_key, trf};
 use crate::ui::fonts::{CODE_SIZE, SMALL_SIZE};
 use crate::ui::style::ld_pill;
 
-pub const DETAIL_HINT: &str = "Click a cell to see both values in full · N / P or ◀ ▶ move \
-    between differing rows · Right-click a column header to use it as the key.";
+pub const DETAIL_HINT: &str = tr_key(
+    "Click a cell to see both values in full · N / P or ◀ ▶ move \
+    between differing rows · Right-click a column header to use it as the key.",
+);
 /// How many differing column names the head lists.
 const HEAD_COLUMNS: usize = 10;
 const DETAIL_HEIGHT: f32 = 92.0;
@@ -56,18 +60,18 @@ pub struct Detail {
 
 fn pill_text(state: RowState) -> &'static str {
     match state {
-        RowState::Same => "Same",
-        RowState::Differs => "Differs",
-        RowState::LeftOnly => "Left only",
-        RowState::RightOnly => "Right only",
+        RowState::Same => tr_key("Same"),
+        RowState::Differs => tr_key("Differs"),
+        RowState::LeftOnly => tr_key("Left only"),
+        RowState::RightOnly => tr_key("Right only"),
     }
 }
 
 /// "(none)" for a side without a value, "(empty)" for "", else the value.
 fn side_of(value: Option<String>) -> DetailSide {
     let (text, muted) = match value {
-        None => ("(none)".to_owned(), true),
-        Some(value) if value.is_empty() => ("(empty)".to_owned(), true),
+        None => (tr("(none)").to_owned(), true),
+        Some(value) if value.is_empty() => (tr("(empty)").to_owned(), true),
         Some(value) => (value, false),
     };
     DetailSide {
@@ -136,11 +140,13 @@ fn window_side(side: &mut DetailSide, anchor: usize) {
         .filter(|r| r.start < end && r.end > start)
         .map(|r| r.start.max(start) - start + head.len()..r.end.min(end) - start + head.len())
         .collect();
-    side.note = Some(format!(
+    side.note = Some(trf(
         "characters {}–{} of {}",
-        format_size(shown_from as u64),
-        format_size(shown_to as u64),
-        format_size(total as u64)
+        &[
+            &format_size(shown_from as u64),
+            &format_size(shown_to as u64),
+            &format_size(total as u64),
+        ],
     ));
     side.text = format!("{head}{}{tail}", &text[start..end]);
     side.marks = marks;
@@ -168,7 +174,10 @@ impl TableView {
             Some(table.line(data as usize + data_offset(table, header)))
         };
         let number = |side: usize| line(side).map_or("—".to_owned(), |n| n.to_string());
-        let mut head = format!("Left row {} · Right row {}", number(LEFT), number(RIGHT));
+        let mut head = trf(
+            "Left row {} · Right row {}",
+            &[&number(LEFT), &number(RIGHT)],
+        );
         if !diff.keys.is_empty() {
             let key: Vec<&str> = diff
                 .keys
@@ -182,14 +191,14 @@ impl TableView {
                     side_value(diff, table, header, row, c, left).unwrap_or("")
                 })
                 .collect();
-            head.push_str(&format!(" · Key {}", key.join(" | ")));
+            head.push_str(&trf(" · Key {}", &[&key.join(" | ")]));
         }
         if let Some(column) = column.and_then(|c| diff.columns.get(c)) {
-            head.push_str(&format!(" · Column {}", column.name));
+            head.push_str(&trf(" · Column {}", &[&column.name]));
             if column.only_left() {
-                head.push_str(" (left only)");
+                head.push_str(tr(" (left only)"));
             } else if column.only_right() {
-                head.push_str(" (right only)");
+                head.push_str(tr(" (right only)"));
             }
         }
         if paired.state == RowState::Differs {
@@ -200,13 +209,8 @@ impl TableView {
                 .map(|&c| diff.columns[c as usize].name.as_str())
                 .collect();
             head.push_str(&format!(
-                " · {} {}: {}{}",
-                differing.len(),
-                if differing.len() == 1 {
-                    "cell differs"
-                } else {
-                    "cells differ"
-                },
+                " · {}: {}{}",
+                count_of(differing.len() as u64, "cell differs", "cells differ"),
                 names.join(", "),
                 if differing.len() > HEAD_COLUMNS {
                     " …"
@@ -277,7 +281,7 @@ impl TableView {
         let Some(detail) = self.detail().filter(|_| self.diff.is_some()) else {
             return panel
                 .text_color(p.muted)
-                .child(DETAIL_HINT)
+                .prose(tr(DETAIL_HINT))
                 .into_any_element();
         };
         let (pill_fg, pill_bg) = match detail.state {
@@ -286,7 +290,8 @@ impl TableView {
             RowState::LeftOnly => (p.del, p.bg_del),
             RowState::RightOnly => (p.ins, p.bg_ins),
         };
-        let value = |label: &'static str, color: Hsla, side: DetailSide, mark: Hsla| {
+        let value = |left: bool, color: Hsla, side: DetailSide, mark: Hsla| {
+            let label = tr(if left { "Left" } else { "Right" });
             let marks = side
                 .marks
                 .into_iter()
@@ -320,7 +325,7 @@ impl TableView {
                         .gap(px(8.))
                         .child(
                             div()
-                                .id(if label == "Left" {
+                                .id(if left {
                                     "table-detail-left"
                                 } else {
                                     "table-detail-right"
@@ -333,7 +338,7 @@ impl TableView {
                                 .child(StyledText::new(side.text).with_highlights(marks)),
                         )
                         .children(side.note.map(|note| {
-                            div().flex_none().pt(px(1.)).text_color(p.muted).child(note)
+                            div().flex_none().pt(px(1.)).text_color(p.muted).prose(note)
                         })),
                 )
         };
@@ -343,11 +348,11 @@ impl TableView {
                     .items_center()
                     .gap(px(8.))
                     .pb(px(3.))
-                    .child(ld_pill(detail.pill, pill_fg, pill_bg))
-                    .child(div().child(detail.head)),
+                    .child(ld_pill(tr(detail.pill), pill_fg, pill_bg))
+                    .child(div().prose(detail.head)),
             )
-            .child(value("Left", p.del, detail.left, p.hl_del))
-            .child(value("Right", p.ins, detail.right, p.hl_ins))
+            .child(value(true, p.del, detail.left, p.hl_del))
+            .child(value(false, p.ins, detail.right, p.hl_ins))
             .into_any_element()
     }
 }

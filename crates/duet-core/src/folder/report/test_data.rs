@@ -13,6 +13,7 @@ use super::{
 };
 use crate::cancel::CancelToken;
 use crate::folder::run::{CompareMode, FolderOptions, FolderProgress, FolderTextRules};
+use crate::i18n::Lang;
 
 pub fn facts(rel: &str, len: u64) -> SideFacts {
     SideFacts {
@@ -37,6 +38,7 @@ pub fn item(rel: &str, state: ItemState) -> ReportItem {
         similar: false,
         odd_text: [false; 2],
         whole_folder: None,
+        moved_to: None,
     }
 }
 
@@ -51,6 +53,7 @@ pub fn options() -> ReportOptions {
         mask: true,
         unimportant: true,
         same: false,
+        lang: Lang::En,
     }
 }
 

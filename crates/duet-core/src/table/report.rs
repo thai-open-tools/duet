@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 
+use crate::i18n::{scoped_lang, tr, tr_key, trf};
 use crate::table::compare::{CompareOptions, RowState, TableDiff, data_offset};
 use crate::table::nav::side_value;
 use crate::table::{Record, Table};
@@ -93,30 +94,71 @@ pub struct ReportSide<'a> {
     pub describe: String,
 }
 
+/// What a report says beside its rows, in the report's language.
+#[derive(Debug, Clone, Default)]
+pub struct ReportNotes {
+    /// Of the left side (for a CSV: its "Left value" column).
+    pub left: Vec<String>,
+    /// Of the right side (for a CSV: its "Right value" column).
+    pub right: Vec<String>,
+    /// Of the pair.
+    pub both: Vec<String>,
+    /// What the status says of a result with no differences that is not the whole story (the
+    /// rows read are identical, the rest was not read). Said where the report would say "No
+    /// differing rows."
+    pub verdict: Option<String>,
+}
+
 pub fn differences_csv(diff: &TableDiff, left: &Table, right: &Table, header: bool) -> String {
+    differences_csv_with(diff, left, right, header, &ReportNotes::default())
+}
+
+/// [`differences_csv`] with a `Note` row for each note, after the header row.
+pub fn differences_csv_with(
+    diff: &TableDiff,
+    left: &Table,
+    right: &Table,
+    header: bool,
+    notes: &ReportNotes,
+) -> String {
     let mut out = String::from('\u{feff}');
     csv_line(
         &mut out,
         &[
-            "Status",
-            "Left row",
-            "Right row",
-            "Key",
-            "Column",
-            "Left value",
-            "Right value",
+            tr("Status"),
+            tr("Left row"),
+            tr("Right row"),
+            tr("Key"),
+            tr("Column"),
+            tr("Left value"),
+            tr("Right value"),
         ],
     );
+    let note = |out: &mut String, left: &str, right: &str| {
+        csv_line(out, &[tr("Note"), "", "", "", "", left, right]);
+    };
+    if let Some(verdict) = &notes.verdict {
+        note(&mut out, verdict, "");
+    }
+    for text in &notes.left {
+        note(&mut out, text, "");
+    }
+    for text in &notes.right {
+        note(&mut out, "", text);
+    }
+    for text in &notes.both {
+        note(&mut out, text, "");
+    }
     for column in &diff.columns {
         if column.only_left() {
             csv_line(
                 &mut out,
-                &["Left-only column", "", "", "", &column.name, "", ""],
+                &[tr("Left-only column"), "", "", "", &column.name, "", ""],
             );
         } else if column.only_right() {
             csv_line(
                 &mut out,
-                &["Right-only column", "", "", "", &column.name, "", ""],
+                &[tr("Right-only column"), "", "", "", &column.name, "", ""],
             );
         }
     }
@@ -135,7 +177,7 @@ pub fn differences_csv(diff: &TableDiff, left: &Table, right: &Table, header: bo
                     let b = side_value(diff, Some(right), header, index, c, false).unwrap_or("");
                     csv_line(
                         &mut out,
-                        &["Differs", &ln, &rn, &key, &diff.columns[c].name, a, b],
+                        &[tr("Differs"), &ln, &rn, &key, &diff.columns[c].name, a, b],
                     );
                 }
             }
@@ -146,7 +188,7 @@ pub fn differences_csv(diff: &TableDiff, left: &Table, right: &Table, header: bo
                 );
                 csv_line(
                     &mut out,
-                    &["Left only", &ln, "", &key, WHOLE_ROW, &whole, ""],
+                    &[tr("Left only"), &ln, "", &key, tr(WHOLE_ROW), &whole, ""],
                 );
             }
             RowState::RightOnly => {
@@ -156,7 +198,7 @@ pub fn differences_csv(diff: &TableDiff, left: &Table, right: &Table, header: bo
                 );
                 csv_line(
                     &mut out,
-                    &["Right only", "", &rn, &key, WHOLE_ROW, "", &whole],
+                    &[tr("Right only"), "", &rn, &key, tr(WHOLE_ROW), "", &whole],
                 );
             }
             RowState::Same => {}
@@ -165,7 +207,7 @@ pub fn differences_csv(diff: &TableDiff, left: &Table, right: &Table, header: bo
     out
 }
 
-const WHOLE_ROW: &str = "(whole row)";
+const WHOLE_ROW: &str = tr_key("(whole row)");
 
 const HTML_STYLE: &str = "body{font:13px/1.5 \"Segoe UI\",\"Leelawadee UI\",\"Noto Sans Thai\",sans-serif;color:#232830;background:#fff;margin:24px}\
 h1{font-size:18px;margin:0 0 10px}table{border-collapse:collapse}.meta td,.meta th{padding:2px 10px 2px 0;text-align:left;vertical-align:top}\
@@ -183,60 +225,118 @@ pub fn html_report(
     opts: &CompareOptions,
     generated: &str,
 ) -> String {
+    html_report_with(diff, left, right, opts, generated, &[])
+}
+
+/// [`html_report`] with a line for each note of the pair; a side's own notes are in its `describe`.
+pub fn html_report_with(
+    diff: &TableDiff,
+    left: &ReportSide,
+    right: &ReportSide,
+    opts: &CompareOptions,
+    generated: &str,
+    notes: &[String],
+) -> String {
+    html_report_full(diff, left, right, opts, generated, notes, None)
+}
+
+/// [`html_report_with`] and the `verdict` to say instead of "No differing rows." when no row
+/// differs but the result is not the whole story.
+pub fn html_report_full(
+    diff: &TableDiff,
+    left: &ReportSide,
+    right: &ReportSide,
+    opts: &CompareOptions,
+    generated: &str,
+    notes: &[String],
+    verdict: Option<&str>,
+) -> String {
     let header = opts.header;
     let (lt, rt) = (left.table, right.table);
     let mut parts: Vec<String> = Vec::new();
     if diff.keys.is_empty() {
-        parts.push("Aligned by row order".into());
+        parts.push(tr("Aligned by row order").into());
     } else {
         let names: Vec<&str> = diff
             .keys
             .iter()
             .map(|&c| diff.columns[c].name.as_str())
             .collect();
-        parts.push(format!("Key: {}", names.join(", ")));
+        parts.push(trf("Key: {}", &[&names.join(", ")]));
     }
     if header {
-        parts.push("First row is a header".into());
+        parts.push(tr("First row is a header").into());
     }
     if opts.rules.ignore_case {
-        parts.push("Ignore case".into());
+        parts.push(tr("Ignore case").into());
     }
     if opts.rules.trim {
-        parts.push("Trim spaces".into());
+        parts.push(tr("Trim spaces").into());
     }
     if opts.rules.numbers {
-        parts.push("Compare numbers by value".into());
+        parts.push(tr("Compare numbers by value").into());
     }
 
     let c = &diff.counts;
     let mut out = String::new();
+    let (lang, title) = (
+        scoped_lang().unwrap_or_default().code(),
+        tr("Table compare report"),
+    );
     out.push_str(&format!(
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Table compare report - {} \u{2194} {}</title><style>{HTML_STYLE}</style></head><body>",
+        "<!DOCTYPE html><html lang=\"{lang}\"><head><meta charset=\"utf-8\"><title>{title} - {} \u{2194} {}</title><style>{HTML_STYLE}</style></head><body>",
         escape(left.name),
         escape(right.name)
     ));
     out.push_str(&format!(
-        "<h1>Table compare report</h1><table class=\"meta\"><tr><th>Left</th><td>{}</td></tr><tr><th>Right</th><td>{}</td></tr><tr><th>Options</th><td>{}</td></tr><tr><th>Generated</th><td>{}</td></tr></table>",
+        "<h1>{title}</h1><table class=\"meta\"><tr><th>{}</th><td>{}</td></tr><tr><th>{}</th><td>{}</td></tr><tr><th>{}</th><td>{}</td></tr><tr><th>{}</th><td>{}</td></tr>",
+        tr("Left"),
         escape(&left.describe),
+        tr("Right"),
         escape(&right.describe),
+        tr("Options"),
         escape(&parts.join(" \u{b7} ")),
+        tr("Generated"),
         escape(generated)
     ));
+    for note in notes {
+        out.push_str(&format!(
+            "<tr><th>{}</th><td>{}</td></tr>",
+            tr("Note"),
+            escape(note)
+        ));
+    }
+    out.push_str("</table>");
     out.push_str(&format!(
-        "<div class=\"sum\"><span>Same <b>{}</b></span><span>Differs <b>{}</b></span><span>Left only <b>{}</b></span><span>Right only <b>{}</b></span><span>Cells differ <b>{}</b></span><span>Left-only columns <b>{}</b></span><span>Right-only columns <b>{}</b></span></div>",
-        c.same, c.differs, c.left_only, c.right_only, c.cells, diff.left_only_columns, diff.right_only_columns
+        "<div class=\"sum\"><span>{} <b>{}</b></span><span>{} <b>{}</b></span><span>{} <b>{}</b></span><span>{} <b>{}</b></span><span>{} <b>{}</b></span><span>{} <b>{}</b></span><span>{} <b>{}</b></span></div>",
+        tr("Same"),
+        c.same,
+        tr("Differs"),
+        c.differs,
+        tr("Left only"),
+        c.left_only,
+        tr("Right only"),
+        c.right_only,
+        tr("Cells differ"),
+        c.cells,
+        tr("Left-only columns"),
+        diff.left_only_columns,
+        tr("Right-only columns"),
+        diff.right_only_columns
     ));
-    out.push_str(
-        "<table class=\"g\"><thead><tr><th>Status</th><th>Left row</th><th>Right row</th>",
-    );
+    out.push_str(&format!(
+        "<table class=\"g\"><thead><tr><th>{}</th><th>{}</th><th>{}</th>",
+        tr("Status"),
+        tr("Left row"),
+        tr("Right row")
+    ));
     for column in &diff.columns {
         let class = if column.only_left() {
-            " class=\"oL\" title=\"Left only\""
+            format!(" class=\"oL\" title=\"{}\"", tr("Left only"))
         } else if column.only_right() {
-            " class=\"oR\" title=\"Right only\""
+            format!(" class=\"oR\" title=\"{}\"", tr("Right only"))
         } else {
-            ""
+            String::new()
         };
         out.push_str(&format!("<th{class}>{}</th>", escape(&column.name)));
     }
@@ -250,9 +350,9 @@ pub fn html_report(
         }
         let (class, status) = match row.state {
             RowState::Same => continue,
-            RowState::Differs => ("m", "Differs"),
-            RowState::LeftOnly => ("l", "Left only"),
-            RowState::RightOnly => ("r", "Right only"),
+            RowState::Differs => ("m", tr("Differs")),
+            RowState::LeftOnly => ("l", tr("Left only")),
+            RowState::RightOnly => ("r", tr("Right only")),
         };
         shown += 1;
         out.push_str(&format!(
@@ -286,12 +386,15 @@ pub fn html_report(
     }
     out.push_str("</tbody></table>");
     if total == 0 {
-        out.push_str("<p>No differing rows.</p>");
+        let said = verdict.map_or_else(|| tr("No differing rows.").to_owned(), escape);
+        out.push_str(&format!("<p>{said}</p>"));
     } else if total > shown {
         out.push_str(&format!(
-            "<p>Showing {} of {} differing rows.</p>",
-            thousands(shown),
-            thousands(total)
+            "<p>{}</p>",
+            trf(
+                "Showing {} of {} differing rows.",
+                &[&thousands(shown), &thousands(total)]
+            )
         ));
     }
     out.push_str("</body></html>");
@@ -469,6 +572,35 @@ mod tests {
     }
 
     #[test]
+    fn a_verdict_stands_where_no_differing_rows_would() {
+        let (lt, rt) = (
+            csv("id
+1
+"),
+            csv("id
+1
+"),
+        );
+        let opts = keyed();
+        let d = run(&lt, &rt, &opts);
+        let (a, b) = (side(&lt, "a.csv"), side(&rt, "b.csv"));
+        let said = "The rows read are identical. The rest of the sheet was not read.";
+        let page = html_report_full(&d, &a, &b, &opts, "2026-10-17 10:00", &[], Some(said));
+        assert!(
+            page.contains(said) && !page.contains("No differing rows."),
+            "{page}"
+        );
+        let page = html_report_full(&d, &a, &b, &opts, "2026-10-17 10:00", &[], None);
+        assert!(page.contains("No differing rows."), "{page}");
+        let notes = ReportNotes {
+            verdict: Some(said.to_owned()),
+            ..ReportNotes::default()
+        };
+        let text = differences_csv_with(&d, &lt, &rt, true, &notes);
+        assert!(text.contains(&format!("Note,,,,,{said},")), "{text}");
+    }
+
+    #[test]
     fn export_names_are_safe() {
         assert_eq!(
             export_name("my data.csv", "b:c?.tsv", false),
@@ -482,6 +614,54 @@ mod tests {
             export_name("dir.x/a.b.csv", "noext", false),
             "table-diff-dir.x_a.b-vs-noext.csv"
         );
+    }
+
+    fn notes() -> ReportNotes {
+        ReportNotes {
+            left: vec!["Left note, with a comma.".to_owned()],
+            right: vec!["Right note.".to_owned()],
+            both: vec!["A note on the pair.".to_owned()],
+            verdict: None,
+        }
+    }
+
+    #[test]
+    fn a_csv_says_its_notes_after_its_header() {
+        let (l, r) = (csv("id,v\n1,a\n"), csv("id,v\n1,b\n"));
+        let d = run(&l, &r, &keyed());
+        assert_eq!(
+            differences_csv_with(&d, &l, &r, true, &notes()),
+            "\u{feff}Status,Left row,Right row,Key,Column,Left value,Right value\r\n\
+             Note,,,,,\"Left note, with a comma.\",\r\n\
+             Note,,,,,,Right note.\r\n\
+             Note,,,,,A note on the pair.,\r\n\
+             Differs,2,2,1,v,a,b\r\n"
+        );
+        assert_eq!(
+            differences_csv_with(&d, &l, &r, true, &ReportNotes::default()),
+            differences_csv(&d, &l, &r, true),
+            "no notes, no rows"
+        );
+    }
+
+    #[test]
+    fn an_html_report_says_the_notes_of_the_pair() {
+        let (l, r) = (csv("id\n1\n"), csv("id\n1\n"));
+        let d = run(&l, &r, &keyed());
+        let page = html_report_with(
+            &d,
+            &side(&l, "a.csv"),
+            &side(&r, "b.csv"),
+            &keyed(),
+            "now",
+            &["A <note> on the pair.".to_owned()],
+        );
+        assert!(
+            page.contains("<tr><th>Note</th><td>A &lt;note&gt; on the pair.</td></tr>"),
+            "{page}"
+        );
+        let plain = html_report(&d, &side(&l, "a.csv"), &side(&r, "b.csv"), &keyed(), "now");
+        assert!(!plain.contains("<th>Note</th>"), "no notes, no line");
     }
 
     proptest! {

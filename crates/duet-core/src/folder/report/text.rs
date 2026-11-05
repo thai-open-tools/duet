@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 use super::lines::{DetailRow, LineDetails, RowClass, line_summary};
 use super::{
     ItemState, NOT_SCANNED_HINT, ReportContext, ReportItem, ReportOptions, attention, count_text,
-    report_counts, sort_items, unimportant_reason,
+    moved_note, report_counts, sort_items, unimportant_reason,
 };
 use crate::folder::tree::Side;
+use crate::i18n::{scoped, tr, trf};
 
 fn num(n: usize) -> String {
     count_text(n as u64, "", "").trim_end().to_owned()
@@ -20,72 +21,74 @@ pub fn folder_text(
     options: &ReportOptions,
     context: &ReportContext,
 ) -> String {
+    let _lang = scoped(options.lang);
     let names = &options.names;
     let counts = report_counts(items);
     let mut sorted = items.to_vec();
     sort_items(&mut sorted);
     let mut out: Vec<String> = Vec::new();
     out.push(if options.title.is_empty() {
-        "Folder compare report".to_owned()
+        tr("Folder compare report").to_owned()
     } else {
-        format!("Folder compare report \u{2014} {}", options.title)
+        trf("Folder compare report \u{2014} {}", &[&options.title])
     });
     // A note typed on several lines keeps the report's CRLF (M-3).
     out.extend(options.note.lines().map(str::to_owned));
-    out.push(format!("A = {} : {}", names[0], context.side_paths[0]));
-    out.push(format!("B = {} : {}", names[1], context.side_paths[1]));
-    out.push(format!(
+    out.push(trf("A = {} : {}", &[&names[0], &context.side_paths[0]]));
+    out.push(trf("B = {} : {}", &[&names[1], &context.side_paths[1]]));
+    out.push(trf(
         "Made {} \u{b7} Criterion: {}{}",
-        context.generated.format("%Y-%m-%d %H:%M"),
-        context.criterion,
-        if lines.is_some() && options.mask && options.details {
-            " \u{b7} Values that look like passwords or keys are hidden"
-        } else {
-            ""
-        }
+        &[
+            &context.generated.format("%Y-%m-%d %H:%M"),
+            &context.criterion,
+            &if lines.is_some() && options.mask && options.details {
+                tr(" \u{b7} Values that look like passwords or keys are hidden")
+            } else {
+                ""
+            },
+        ],
     ));
     if !context.invisible_scan {
-        out.push(format!(
-            "Invisible characters: not scanned ({NOT_SCANNED_HINT})"
+        out.push(trf(
+            "Invisible characters: not scanned ({})",
+            &[&tr(NOT_SCANNED_HINT)],
         ));
     }
     out.push(String::new());
-    out.push("Summary".to_owned());
-    out.push(format!(
+    out.push(tr("Summary").to_owned());
+    out.push(trf(
         "  All files        {}   (mismatched {})",
-        num(counts.total),
-        num(counts.mismatched())
+        &[&num(counts.total), &num(counts.mismatched())],
     ));
-    out.push(format!(
+    out.push(trf(
         "  \u{2260} Different      {}",
-        num(counts.different)
+        &[&num(counts.different)],
     ));
-    out.push(format!(
+    out.push(trf(
         "  < Only in A      {}   ({})",
-        num(counts.left_only),
-        names[0]
+        &[&num(counts.left_only), &names[0]],
     ));
-    out.push(format!(
+    out.push(trf(
         "  > Only in B      {}   ({})",
-        num(counts.right_only),
-        names[1]
+        &[&num(counts.right_only), &names[1]],
     ));
-    out.push(format!(
+    out.push(trf(
         "  = Same           {}{}",
-        num(counts.same),
-        if counts.unimportant > 0 {
-            format!(
-                "   (including {} that {} only in unimportant parts)",
-                num(counts.unimportant),
-                if counts.unimportant == 1 {
-                    "differs"
-                } else {
-                    "differ"
-                }
-            )
-        } else {
-            String::new()
-        }
+        &[
+            &num(counts.same),
+            &if counts.unimportant > 0 {
+                trf(
+                    if counts.unimportant == 1 {
+                        "   (including {} that differs only in unimportant parts)"
+                    } else {
+                        "   (including {} that differ only in unimportant parts)"
+                    },
+                    &[&num(counts.unimportant)],
+                )
+            } else {
+                String::new()
+            },
+        ],
     ));
     let mut watch: Vec<String> = Vec::new();
     for item in &sorted {
@@ -100,7 +103,7 @@ pub fn folder_text(
     }
     if !watch.is_empty() {
         out.push(String::new());
-        out.push("Needs a closer look".to_owned());
+        out.push(tr("Needs a closer look").to_owned());
         out.extend(watch);
     }
     let detail: Vec<&ReportItem> = sorted
@@ -109,7 +112,7 @@ pub fn folder_text(
         .collect();
     if !detail.is_empty() {
         out.push(String::new());
-        out.push("Details by folder".to_owned());
+        out.push(tr("Details by folder").to_owned());
         // Items are already in state order, then by lower-cased path; a folder keeps that.
         let mut by_dir: BTreeMap<&str, Vec<&ReportItem>> = BTreeMap::new();
         for item in detail {
@@ -120,7 +123,11 @@ pub fn folder_text(
             out.push(String::new());
             out.push(format!(
                 "[{}]",
-                if dir.is_empty() { "(top level)" } else { dir }
+                if dir.is_empty() {
+                    tr("(top level)")
+                } else {
+                    dir
+                }
             ));
             group.sort_by(|x, y| (rank(x), &x.rel).cmp(&(rank(y), &y.rel)));
             for item in group {
@@ -133,7 +140,7 @@ pub fn folder_text(
             sorted.iter().filter(|item| item.unimportant()).collect();
         if !unimportant.is_empty() {
             out.push(String::new());
-            out.push("Differs only in unimportant parts (counted as Same)".to_owned());
+            out.push(tr("Differs only in unimportant parts (counted as Same)").to_owned());
             for item in unimportant {
                 out.push(format!(
                     "  \u{2248} {}   \u{2014} {}",
@@ -165,8 +172,8 @@ fn file_lines(
     let info = lines.and_then(|lines| lines.files.get(&item.rel));
     let mut why: Vec<String> = Vec::new();
     match item.state {
-        ItemState::LeftOnly => why.push(format!("only in {}", names[0])),
-        ItemState::RightOnly => why.push(format!("only in {}", names[1])),
+        ItemState::LeftOnly => why.push(trf("only in {}", &[&names[0]])),
+        ItemState::RightOnly => why.push(trf("only in {}", &[&names[1]])),
         _ => {}
     }
     if let Some(info) = info {
@@ -183,19 +190,19 @@ fn file_lines(
         } else {
             &names[1]
         };
-        why.push(format!("{name} newer"));
+        why.push(trf("{} newer", &[name]));
     }
     if item.case_only() {
-        why.push("names differ only in case".to_owned());
+        why.push(tr("names differ only in case").to_owned());
     } else if item.format_only()
         && let Some([a, b]) = item.note.as_ref().and_then(|note| note.formats)
     {
-        why.push(format!(
+        why.push(trf(
             "only the file format differs ({} / {})",
-            a.describe(),
-            b.describe()
+            &[&a.describe(), &b.describe()],
         ));
     }
+    why.extend(moved_note(item, names));
     if let Some(note) = info.and_then(|info| info.note.as_ref()) {
         why.push(note.clone());
     }
@@ -225,8 +232,8 @@ fn file_lines(
 /// One line row as `rptDiffRows` writes it, before the 4 spaces of indent.
 fn row_text(row: &DetailRow) -> String {
     match row {
-        DetailRow::Skip(n) => format!("    \u{22ef} {n} same lines"),
-        DetailRow::More(n) => format!("    \u{2026} {n} more rows"),
+        DetailRow::Skip(n) => trf("    \u{22ef} {} same lines", &[n]),
+        DetailRow::More(n) => trf("    \u{2026} {} more rows", &[n]),
         DetailRow::Line {
             class, left, right, ..
         } => {

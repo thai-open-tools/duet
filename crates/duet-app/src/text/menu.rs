@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use duet_core::kind::CompareKind;
 use gpui_kit::{ClipboardItem, Context, InteractiveElement, Window, actions};
 
+use crate::i18n::{tr, trf};
 use crate::text::caret::Caret;
 use crate::text::model::DisplayRow;
 use crate::text::rowsel::RowSel;
@@ -53,43 +54,49 @@ pub fn row_menu(view: &TextView) -> Vec<MenuEntry> {
     };
     let has_lines = !model.side_lines(rows, sel_left).is_empty();
     vec![
-        MenuEntry::action("Copy selected rows to the right", CopyBlockRight).enabled(can(false)),
-        MenuEntry::action("Copy selected rows to the left", CopyBlockLeft).enabled(can(true)),
+        MenuEntry::action(tr("Copy selected rows to the right"), CopyBlockRight)
+            .enabled(can(false)),
+        MenuEntry::action(tr("Copy selected rows to the left"), CopyBlockLeft).enabled(can(true)),
     ]
     .into_iter()
     .chain(in_block.then(|| {
-        MenuEntry::action("Copy this difference to the right", CopyBlockHereRight)
+        MenuEntry::action(tr("Copy this difference to the right"), CopyBlockHereRight)
             .enabled(can(false))
     }))
     .chain(in_block.then(|| {
-        MenuEntry::action("Copy this difference to the left", CopyBlockHereLeft).enabled(can(true))
+        MenuEntry::action(tr("Copy this difference to the left"), CopyBlockHereLeft)
+            .enabled(can(true))
     }))
     .chain([
         MenuEntry::Separator,
         MenuEntry::action(
             if placeholder {
-                "Insert a line here"
+                tr("Insert a line here")
             } else {
-                "Edit this line"
+                tr("Edit this line")
             },
             EditRow,
         )
         .enabled(can(side)),
-        MenuEntry::action("Delete selected lines", DeleteRows).enabled(can(sel_left) && has_lines),
-        MenuEntry::action("Copy text", CopyText),
+        MenuEntry::action(tr("Delete selected lines"), DeleteRows)
+            .enabled(can(sel_left) && has_lines),
+        MenuEntry::action(tr("Copy text"), CopyText),
         MenuEntry::Separator,
         MenuEntry::action(
-            "Align this line with a line on the other side…",
+            tr("Align this line with a line on the other side…"),
             AlignWithOtherSide,
         )
         .enabled(!placeholder),
         MenuEntry::action(
-            format!("Clear manual alignments ({})", view.anchors().len()),
+            trf("Clear manual alignments ({})", &[&view.anchors().len()]),
             ClearAlignments,
         )
         .enabled(!view.anchors().is_empty()),
-        MenuEntry::action("Treat lines like this as unimportant", TreatAsUnimportant)
-            .enabled(!placeholder),
+        MenuEntry::action(
+            tr("Treat lines like this as unimportant"),
+            TreatAsUnimportant,
+        )
+        .enabled(!placeholder),
     ])
     .collect()
 }
@@ -116,31 +123,31 @@ pub fn path_menu(view: &TextView, left: bool) -> Vec<MenuEntry> {
         };
     }
     vec![
-        side!("Open file…", OpenLeftFile, OpenRightFile),
+        side!(tr("Open file…"), OpenLeftFile, OpenRightFile),
         side!(
-            "Paste from clipboard (replace this side)",
+            tr("Paste from clipboard (replace this side)"),
             PasteSideLeft,
             PasteSideRight
         )
         .enabled(editable),
         MenuEntry::Separator,
-        side!("Save", SaveLeft, SaveRight).enabled(dirty),
-        side!("Save as…", SaveLeftAs, SaveRightAs).enabled(has_text),
+        side!(tr("Save"), SaveLeft, SaveRight).enabled(dirty),
+        side!(tr("Save as…"), SaveLeftAs, SaveRightAs).enabled(has_text),
         MenuEntry::Separator,
-        side!("Copy path", CopyLeftPath, CopyRightPath),
-        side!("Show in Explorer", RevealLeftFile, RevealRightFile).enabled(exists),
+        side!(tr("Copy path"), CopyLeftPath, CopyRightPath),
+        side!(tr("Show in Explorer"), RevealLeftFile, RevealRightFile).enabled(exists),
         side!(
-            "Open with default app",
+            tr("Open with default app"),
             OpenLeftExternally,
             OpenRightExternally
         )
         .enabled(exists),
         MenuEntry::Separator,
-        MenuEntry::action("Open in hex", OpenInHex)
+        MenuEntry::action(tr("Open in hex"), OpenInHex)
             .enabled(view.request.left.exists() && view.request.right.exists()),
-        MenuEntry::action("Open as table", OpenAsTable)
+        MenuEntry::action(tr("Open as table"), OpenAsTable)
             .enabled(view.request.left.exists() && view.request.right.exists()),
-        MenuEntry::action("Open as picture", OpenAsPicture)
+        MenuEntry::action(tr("Open as picture"), OpenAsPicture)
             .enabled(view.request.left.exists() && view.request.right.exists()),
     ]
 }
@@ -186,7 +193,7 @@ impl TextView {
 
     /// The message is the binary one: files that are not text, with nothing to show.
     pub(crate) fn is_binary_message(&self) -> bool {
-        self.message.is_some() && self.message_hint() == Some(BINARY_HINT)
+        self.message.is_some() && self.message_hint() == Some(tr(BINARY_HINT))
     }
 
     /// Both files are named like pictures, so the binary notice can offer them as such.
@@ -208,10 +215,13 @@ impl TextView {
         cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
     }
 
-    /// Whether the side holds text that Save as… can write.
+    /// Whether the side holds text that Save as… can write: its own, not the sorted or
+    /// formatted view of it.
     pub(crate) fn side_has_text(&self, left: bool) -> bool {
         self.model.as_ref().is_some_and(|m| {
-            m.buffer(left).is_some() || (if left { m.left() } else { m.right() }).text().is_some()
+            m.derived_view(left).is_none()
+                && (m.buffer(left).is_some()
+                    || (if left { m.left() } else { m.right() }).text().is_some())
         })
     }
 
@@ -317,7 +327,7 @@ impl TextView {
                     self.ensure_caret_visible(cx);
                     window.focus(&self.focus, cx);
                 }
-                None => self.notice = Some("Pick a line first.".into()),
+                None => self.notice = Some(tr("Pick a line first.").into()),
             }
             cx.notify();
             return;

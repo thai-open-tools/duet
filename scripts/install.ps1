@@ -1,6 +1,7 @@
 # Installs duet for the current user: copies the release build to %LOCALAPPDATA%\Programs\duet
 # and adds "duet compare" shortcuts to the Desktop and the Start menu. Run it again after a new build.
-# Remove: delete that folder, %LOCALAPPDATA%\duet (settings, recent list) and the two shortcuts.
+# Remove: run `duet --unregister-shell` first (the Explorer right-click verbs), then delete that
+# folder, %LOCALAPPDATA%\duet (settings, recent list) and the two shortcuts.
 param(
     [string]$BinDir = (Join-Path $PSScriptRoot '..\target\release'),
     [switch]$Build
@@ -58,6 +59,10 @@ foreach ($dir in $places) {
         if ($target -eq $exe) { Remove-Item -LiteralPath $old }
     }
 }
+# The Explorer right-click verbs, written by the exe itself. Start-Process -Wait, because duet.exe is
+# a GUI-subsystem exe and `&` would not wait for it.
+$reg = Start-Process -FilePath $exe -ArgumentList '--register-shell' -Wait -PassThru
+if ($reg.ExitCode -ne 0) { throw '--register-shell failed' }
 # Explorer caches icons: without this, a shortcut made before the exe had its icon stays blank.
 $refresh = Join-Path $env:SystemRoot 'System32\ie4uinit.exe'
 if (Test-Path $refresh) { & $refresh -show }

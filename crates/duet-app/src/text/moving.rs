@@ -7,6 +7,7 @@ use gpui_kit::{
 
 use gpui_kit::TestSupportExt as _;
 
+use crate::i18n::{tr, tr_key};
 use crate::palette::Palette;
 use crate::text::model::DisplayRow;
 use crate::text::view::TextView;
@@ -26,7 +27,7 @@ pub(crate) struct MoveDrag {
 
 /// How far, in px, the pointer must travel from the press before it counts as a drag.
 const JITTER: f32 = 4.0;
-const OWN_SIDE: &str = "Drop the line on its own side.";
+const OWN_SIDE: &str = tr_key("Drop the line on its own side.");
 
 /// Where a release at a point would drop the line: the side and the display row under the
 /// pointer, whether the pointer is in the row's lower half, and the window y of the boundary the
@@ -144,7 +145,7 @@ impl TextView {
             return;
         };
         if drop.left != drag.left {
-            self.notice = Some(OWN_SIDE.into());
+            self.notice = Some(tr(OWN_SIDE).into());
             return;
         }
         let Some(model) = self.model.as_ref() else {

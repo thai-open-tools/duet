@@ -2295,3 +2295,30 @@ async fn esc_replaces_the_still_comparing_notice_with_the_cancelled_text(cx: &mu
     cx.update_window(handle, |_, window, _| window.remove_window())
         .unwrap();
 }
+
+#[gpui_kit::test]
+async fn the_still_comparing_notice_of_the_arrow_keys_is_thai_and_turns_into_cancelled(
+    cx: &mut TestAppContext,
+) {
+    use duet_app::i18n::{Lang, scoped, tr};
+    let _th = scoped(Lang::Th);
+    let (handle, view) = open_hex_sources(
+        cx,
+        HexSource::synthetic(4 << 30, 0),
+        HexSource::synthetic(4 << 30, 0),
+    );
+    assert!(view.read_with(cx, |v, _| v.is_busy()));
+    view.update(cx, |v, cx| v.set_only_differences(true, cx));
+    press(cx, handle, "down");
+    let thai = tr("Still comparing…");
+    assert_ne!(thai, "Still comparing…");
+    assert_eq!(notice(cx, &view).as_deref(), Some(thai));
+    press(cx, handle, "escape");
+    assert_eq!(
+        notice(cx, &view).as_deref(),
+        Some(tr("Cancelled: the result is incomplete."))
+    );
+    drop(view);
+    cx.update_window(handle, |_, window, _| window.remove_window())
+        .unwrap();
+}

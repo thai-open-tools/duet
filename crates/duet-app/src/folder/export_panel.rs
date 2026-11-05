@@ -29,7 +29,7 @@ use duet_core::folder::report::{
 use duet_core::folder::run::FolderTextRules;
 use duet_core::folder::tree::FolderComparison;
 use gpui_kit::TestSupportExt as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Context, Entity, FocusHandle, FontWeight, InteractiveElement, Subscription,
@@ -41,12 +41,15 @@ use crate::folder::model::FolderFilter;
 use crate::folder::prefs::text_rules_of;
 use crate::folder::view::FolderView;
 use crate::format::{count_of, format_size};
+use crate::i18n::{Lang, live, scoped, tr, tr_key, trf};
 use crate::palette::Palette;
 use crate::paths::home_dir;
 use crate::settings;
 use crate::text::prefs::{TextPrefs, pull_shared};
+use crate::ui::edit_menu::{ld_input, ld_textarea};
 use crate::ui::fonts::Fonts;
 use crate::ui::menu::MenuEntry;
+use crate::ui::prose::ProseExt as _;
 use crate::ui::style::{
     LdExt as _, ld_button, ld_card, ld_primary, ld_segment, ld_segmented, ld_toggle,
 };
@@ -76,38 +79,47 @@ const TITLE_MAX: usize = 160;
 const NOTE_MAX: usize = 2000;
 const CONTEXT_MAX: u32 = 20;
 
-const COMPARED_AGAIN: &str = "The folders were compared again, so the export was closed.";
-const EXPORT_RUNNING: &str = "Wait for the export to finish.";
-const NO_FILES: &str = "No files in the chosen scope.";
-const TABLE_HELP: &str = "The table has every file in the scope, same files too, one row per file with its line counts: filter it further in Excel.";
-const CRITERION_HELP: &str =
-    "The criterion does not read contents: choose Content to get differing lines and line counts.";
+const COMPARED_AGAIN: &str = tr_key("The folders were compared again, so the export was closed.");
+const EXPORT_RUNNING: &str = tr_key("Wait for the export to finish.");
+const NO_FILES: &str = tr_key("No files in the chosen scope.");
+const TABLE_HELP: &str = tr_key(
+    "The table has every file in the scope, same files too, one row per file with its line counts: filter it further in Excel.",
+);
+const LANG_HELP: &str = tr_key(
+    "The language of the whole report, column names and status words included. Choose English if a script reads the file.",
+);
+const CRITERION_HELP: &str = tr_key(
+    "The criterion does not read contents: choose Content to get differing lines and line counts.",
+);
+/// The two fields whose placeholder `relabel_export` sets again.
+const TITLE_PLACEHOLDER: &str = tr_key("For example: check the config before deploying (optional)");
+const NOTE_PLACEHOLDER: &str = tr_key("Optional");
 
 /// Each format's radio: what it is, its id, its name and LocalDiff's words for it.
 const FORMATS: [(ReportFormat, &str, &str, &str); 4] = [
     (
         ReportFormat::Html,
         "folder-export-format-html",
-        "HTML",
-        "easy to read, with a summary and a chart, searchable, prints to PDF",
+        tr_key("HTML"),
+        tr_key("easy to read, with a summary and a chart, searchable, prints to PDF"),
     ),
     (
         ReportFormat::Xlsx,
         "folder-export-format-xlsx",
-        "Excel (.xlsx)",
-        "team tracking: filters, status colours, columns for reviewers",
+        tr_key("Excel (.xlsx)"),
+        tr_key("team tracking: filters, status colours, columns for reviewers"),
     ),
     (
         ReportFormat::Csv,
         "folder-export-format-csv",
-        "CSV",
-        "one table, to import into other programs or scripts",
+        tr_key("CSV"),
+        tr_key("one table, to import into other programs or scripts"),
     ),
     (
         ReportFormat::Text,
         "folder-export-format-txt",
-        "Text (.txt)",
-        "easy to attach to an email or chat",
+        tr_key("Text (.txt)"),
+        tr_key("easy to attach to an email or chat"),
     ),
 ];
 
@@ -124,11 +136,11 @@ fn extension(format: ReportFormat) -> &'static str {
 pub fn report_menu(view: &FolderView) -> Vec<MenuEntry> {
     let on = view.can_report();
     vec![
-        MenuEntry::action("HTML report: summary and per-file details…", ReportHtml).enabled(on),
-        MenuEntry::action("Excel (.xlsx): track the review as a team…", ReportXlsx).enabled(on),
+        MenuEntry::action(tr("HTML report: summary and per-file details…"), ReportHtml).enabled(on),
+        MenuEntry::action(tr("Excel (.xlsx): track the review as a team…"), ReportXlsx).enabled(on),
         MenuEntry::Separator,
-        MenuEntry::action("Text report (.txt)…", ReportText).enabled(on),
-        MenuEntry::action("CSV: a table for other programs…", ReportCsv).enabled(on),
+        MenuEntry::action(tr("Text report (.txt)…"), ReportText).enabled(on),
+        MenuEntry::action(tr("CSV: a table for other programs…"), ReportCsv).enabled(on),
     ]
 }
 
@@ -199,6 +211,9 @@ struct ExportPanel {
     choices: ExportChoices,
     /// The names the fields started with: an emptied name falls back to it (`val || nm[0]`).
     prefilled: [String; 2],
+    /// The default names in the report's language now: a name still equal to one is not the
+    /// person's, so it follows the language and is never remembered.
+    defaults: [String; 2],
     fields: Fields,
     focus: FocusHandle,
     counts: Option<(CountKey, ScopeCounts)>,
@@ -224,17 +239,16 @@ impl Drop for RunningExport {
 impl RunningExport {
     fn progress_text(&self) -> String {
         if self.cancel.is_cancelled() {
-            return "Cancelling…".to_owned();
+            return tr("Cancelling…").to_owned();
         }
         let total = self.total.load(Ordering::Relaxed);
         if total == 0 {
-            return "Creating the report… · Esc to cancel".to_owned();
+            return tr("Creating the report… · Esc to cancel").to_owned();
         }
         let done = self.done.load(Ordering::Relaxed).min(total);
-        format!(
+        trf(
             "Reading the differing files… {} of {} · Esc to cancel",
-            format_size(done as u64),
-            format_size(total as u64)
+            &[&format_size(done as u64), &format_size(total as u64)],
         )
     }
 }
@@ -245,6 +259,26 @@ struct Started {
     cancel: CancelToken,
     done: Arc<AtomicUsize>,
     total: Arc<AtomicUsize>,
+}
+
+/// Why an export did not finish. A workbook too big for ZIP is told in the window's language when
+/// the notice is made, not in the report's, on the job's thread.
+enum ExportError {
+    TooLarge,
+    Write(String),
+}
+
+const WORKBOOK_TOO_LARGE: &str =
+    tr_key("The workbook is too large for the Excel format (over 4 GiB)");
+
+/// The notice for how an export ended, in the language in force.
+fn export_notice(outcome: &Result<bool, ExportError>, path: &Path) -> String {
+    match outcome {
+        Ok(true) => trf("Exported: {}.", &[&path.display()]),
+        Ok(false) => tr("Export cancelled.").to_owned(),
+        Err(ExportError::TooLarge) => trf("Can't export: {}.", &[&tr(WORKBOOK_TOO_LARGE)]),
+        Err(ExportError::Write(err)) => trf("Can't export: {}.", &[err]),
+    }
 }
 
 /// The folder view's export state.
@@ -283,10 +317,13 @@ impl ExportJob {
         cancel: &CancelToken,
         done: &AtomicUsize,
         total: &AtomicUsize,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, ExportError> {
         if cancel.is_cancelled() {
             return Ok(false);
         }
+        // This thread has no language of its own: the report's comes from its options, never
+        // from the window's.
+        let _lang = scoped(self.options.lang);
         let [left, right] = &self.roots;
         let items = report_items(&self.cmp, &self.nodes, left, right, self.odd.as_ref());
         let o = &self.options;
@@ -317,10 +354,10 @@ impl ExportJob {
             ReportFormat::Csv => folder_csv(&items, lines, &o.names).into_bytes(),
             // M-7: a workbook past 4 GiB fails the export; nothing is written.
             ReportFormat::Xlsx => {
-                folder_xlsx(&items, lines, o, context).map_err(|err| err.to_string())?
+                folder_xlsx(&items, lines, o, context).map_err(|_| ExportError::TooLarge)?
             }
         };
-        write_atomic(path, &bytes, cancel).map_err(|err| err.to_string())
+        write_atomic(path, &bytes, cancel).map_err(|err| ExportError::Write(err.to_string()))
     }
 }
 
@@ -335,6 +372,19 @@ fn remembered_names(list: &Value, pair: &str) -> Option<[String; 2]> {
         [a, b] => Some([a.as_str()?.to_owned(), b.as_str()?.to_owned()]),
         _ => None,
     }
+}
+
+/// What of `names` is worth remembering: a name equal to a default, in either language, is the
+/// program's wording and not the person's, so it is kept as empty and read back as the default
+/// of the language then.
+fn names_to_keep(names: &[String; 2], defaults: [[String; 2]; 2]) -> [String; 2] {
+    std::array::from_fn(|i| {
+        if defaults.iter().any(|d| d[i] == names[i]) {
+            String::new()
+        } else {
+            names[i].clone()
+        }
+    })
 }
 
 /// The list with `pair`'s names moved to the end, the oldest dropped past `NAMES_KEPT`.
@@ -431,6 +481,16 @@ impl FolderView {
         ])
     }
 
+    /// Test hook: the placeholders the title and note fields show.
+    #[doc(hidden)]
+    pub fn export_placeholders_for_test(&self, cx: &App) -> Option<[String; 2]> {
+        let f = &self.export.panel.as_ref()?.fields;
+        Some([
+            f.title.read(cx).presentation().placeholder().to_string(),
+            f.note.read(cx).presentation().placeholder().to_string(),
+        ])
+    }
+
     /// PF14: true, with a notice, while a batch or an export runs. A copy, delete, touch or
     /// sync waits for either: a file the export holds open could not go to the Recycle Bin.
     pub(super) fn refuse_while_working(&mut self, cx: &mut Context<Self>) -> bool {
@@ -440,7 +500,7 @@ impl FolderView {
         if self.export.running.is_none() {
             return false;
         }
-        self.notice = Some(EXPORT_RUNNING.into());
+        self.notice = Some(tr(EXPORT_RUNNING).into());
         cx.notify();
         true
     }
@@ -451,11 +511,11 @@ impl FolderView {
             return true;
         }
         let why = if self.export.running.is_some() {
-            Some(EXPORT_RUNNING)
+            Some(tr(EXPORT_RUNNING))
         } else if self.is_busy() {
-            Some("Wait for the compare to finish.")
+            Some(tr("Wait for the compare to finish."))
         } else if !self.result_ready() {
-            Some("Compare the folders first.")
+            Some(tr("Compare the folders first."))
         } else {
             None
         };
@@ -464,6 +524,12 @@ impl FolderView {
             cx.notify();
         }
         why.is_some()
+    }
+
+    /// The two sides' default names as `lang` says them.
+    fn default_names_in(&self, lang: Lang) -> [String; 2] {
+        let _lang = scoped(lang);
+        default_names(&self.left, &self.right)
     }
 
     /// The key the names are remembered under: the roots as typed.
@@ -508,10 +574,23 @@ impl FolderView {
             .unwrap_or_default();
         let flag =
             |key: &str, default: bool| saved.get(key).and_then(Value::as_bool).unwrap_or(default);
+        // The report starts in the language the window is in, and the panel does not save it.
+        let lang = crate::i18n::current();
+        let defaults = self.default_names_in(lang);
+        // A remembered empty name is a default that was not kept.
         let names = saved
             .get(REPORT_NAMES)
             .and_then(|list| remembered_names(list, &self.pair_key()))
-            .unwrap_or_else(|| default_names(&self.left, &self.right));
+            .map(|kept| {
+                let mut kept = kept;
+                for (name, default) in kept.iter_mut().zip(&defaults) {
+                    if name.is_empty() {
+                        name.clone_from(default);
+                    }
+                }
+                kept
+            })
+            .unwrap_or_else(|| defaults.clone());
         let context = saved
             .get(REPORT_CONTEXT)
             .and_then(Value::as_u64)
@@ -526,6 +605,7 @@ impl FolderView {
             mask: flag(REPORT_MASK, true),
             unimportant: flag(REPORT_UNIMPORTANT, true),
             same: flag(REPORT_SAME, false),
+            lang,
         };
         let mut line = |value: &str, placeholder: &'static str| {
             let value = value.to_owned();
@@ -537,15 +617,12 @@ impl FolderView {
         };
         let fields = Fields {
             names: [line(&names[0], ""), line(&names[1], "")],
-            title: line(
-                "",
-                "For example: check the config before deploying (optional)",
-            ),
+            title: line("", tr(TITLE_PLACEHOLDER)),
             context: line(&context.to_string(), ""),
             note: cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .auto_grow(2, 6)
-                    .placeholder("Optional")
+                    .placeholder(tr(NOTE_PLACEHOLDER))
             }),
         };
         let on_line = |field: Field| {
@@ -595,6 +672,7 @@ impl FolderView {
         ExportPanel {
             choices: ExportChoices { format, options },
             prefilled: names,
+            defaults,
             fields,
             focus: cx.focus_handle().tab_stop(true),
             counts: None,
@@ -637,6 +715,29 @@ impl FolderView {
             change(&mut panel.choices);
             cx.notify();
         }
+    }
+
+    /// The report's language changed: a name still at its default is rebuilt in the new one,
+    /// fields included, and a name the person typed stays.
+    fn set_export_lang(&mut self, lang: Lang, window: &mut Window, cx: &mut Context<Self>) {
+        let fresh = self.default_names_in(lang);
+        let Some(panel) = &mut self.export.panel else {
+            return;
+        };
+        panel.choices.options.lang = lang;
+        for (i, new) in fresh.iter().enumerate() {
+            let old = &panel.defaults[i];
+            if panel.prefilled[i] == *old {
+                panel.prefilled[i].clone_from(new);
+            }
+            if panel.choices.options.names[i] == *old {
+                panel.choices.options.names[i].clone_from(new);
+                let text = new.clone();
+                panel.fields.names[i].update(cx, |state, cx| state.set_value(text, window, cx));
+            }
+        }
+        panel.defaults = fresh;
+        cx.notify();
     }
 
     /// Test hook: changes the choices as the panel's controls would, fields included (PF8).
@@ -745,18 +846,18 @@ impl FolderView {
         }
     }
 
-    /// The scope as the report names it.
+    /// The scope as the report names it, in the language `export_context` has set.
     fn scope_text(&self, scope: ReportScope) -> String {
         match scope {
-            ReportScope::All => "All items".to_owned(),
-            ReportScope::Selected => "Selected items only".to_owned(),
+            ReportScope::All => tr("All items").to_owned(),
+            ReportScope::Selected => tr("Selected items only").to_owned(),
             ReportScope::Filtered => {
                 let Some(model) = &self.model else {
                     return String::new();
                 };
-                let mut text = format!("As filtered: “{}”", model.filter().chip_label());
+                let mut text = trf("As filtered: “{}”", &[&tr(model.filter().chip_label())]);
                 if let Some(needle) = model.name_filter() {
-                    text.push_str(&format!(" + path filter “{needle}”"));
+                    text.push_str(&trf(" + path filter “{}”", &[&needle]));
                 }
                 text
             }
@@ -799,7 +900,13 @@ impl FolderView {
         let names = names_with(
             settings::get_json(&file, REPORT_NAMES),
             &self.pair_key(),
-            &o.names,
+            &names_to_keep(
+                &o.names,
+                [
+                    self.default_names_in(Lang::En),
+                    self.default_names_in(Lang::Th),
+                ],
+            ),
         );
         let mut writes: Vec<(&str, Value)> = vec![(REPORT_NAMES, names)];
         if format != ReportFormat::Csv {
@@ -824,11 +931,14 @@ impl FolderView {
     /// (G12).
     fn export_context(
         &self,
+        lang: Lang,
         scope: ReportScope,
         rules: &FolderTextRules,
         tab_width: usize,
         now: DateTime<Local>,
     ) -> ReportContext {
+        // The text this builds from labels reads in the report's language, not the window's.
+        let _lang = scoped(lang);
         let options = self.options();
         ReportContext {
             side_paths: [
@@ -881,7 +991,7 @@ impl FolderView {
         self.remember_export(&choices, cx);
         let nodes = self.scope_nodes(choices.options.scope);
         if nodes.is_empty() {
-            self.notice = Some(NO_FILES.into());
+            self.notice = Some(tr(NO_FILES).into());
             cx.notify();
             return;
         }
@@ -893,6 +1003,7 @@ impl FolderView {
         let rules = text_rules_of(&prefs);
         let now = Local::now();
         let context = self.export_context(
+            choices.options.lang,
             choices.options.scope,
             &rules,
             usize::from(prefs.tab_width),
@@ -1013,7 +1124,7 @@ impl FolderView {
     fn finish_export(
         &mut self,
         id: u64,
-        outcome: Result<bool, String>,
+        outcome: Result<bool, ExportError>,
         path: &Path,
         cx: &mut Context<Self>,
     ) {
@@ -1024,14 +1135,7 @@ impl FolderView {
         if !self.is_busy() {
             self.refresh_status();
         }
-        self.notice = Some(
-            match outcome {
-                Ok(true) => format!("Exported: {}.", path.display()),
-                Ok(false) => "Export cancelled.".to_owned(),
-                Err(err) => format!("Can't export: {err}."),
-            }
-            .into(),
-        );
+        self.notice = Some(export_notice(&outcome, path).into());
         cx.notify();
     }
 
@@ -1041,9 +1145,23 @@ impl FolderView {
             return false;
         };
         run.cancel.cancel();
-        self.set_status("Cancelling…");
+        self.set_status_live(live("Cancelling…"));
         cx.notify();
         true
+    }
+
+    /// The language changed: the two fields that keep a placeholder set it again. The running
+    /// export's line follows on its next tick.
+    pub(super) fn relabel_export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(panel) = &self.export.panel else {
+            return;
+        };
+        panel.fields.title.update(cx, |state, cx| {
+            state.set_placeholder(tr(TITLE_PLACEHOLDER), window, cx)
+        });
+        panel.fields.note.update(cx, |state, cx| {
+            state.set_placeholder(tr(NOTE_PLACEHOLDER), window, cx)
+        });
     }
 
     /// Closes the panel. Without a window at hand, the next frame gives the rows the focus if
@@ -1069,7 +1187,7 @@ impl FolderView {
     pub(super) fn close_export_for_compare(&mut self, cx: &mut Context<Self>) {
         if self.export.panel.is_some() {
             self.close_export(cx);
-            self.notice = Some(COMPARED_AGAIN.into());
+            self.notice = Some(tr(COMPARED_AGAIN).into());
         }
     }
 
@@ -1114,12 +1232,12 @@ impl FolderView {
                     .id(id)
                     .test_support()
                     .w(px(width))
-                    .child(Input::new(input).small().aria_label(name))
+                    .child(ld_input(input).small().aria_label(name))
                     .into_any_element()
             };
         let formats = FORMATS.iter().map(|&(each, id, name, text)| {
             let on = format == each;
-            ld_card(id, format!("{name}: {text}"), p)
+            ld_card(id, format!("{}: {}", tr(name), tr(text)), p)
                 .flex()
                 .flex_row()
                 .flex_wrap()
@@ -1129,8 +1247,8 @@ impl FolderView {
                 .rounded(px(8.))
                 .when(on, |card| card.border_color(p.accent).bg(p.panel3))
                 .aria_selected(on)
-                .child(div().font_weight(FontWeight::SEMIBOLD).child(name))
-                .child(div().text_color(p.dim).child(format!("— {text}")))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(tr(name)))
+                .child(div().text_color(p.dim).prose(format!("— {}", tr(text))))
                 .ld_click(
                     true,
                     cx.listener(move |this, _, _, cx| this.change_export(cx, |c| c.format = each)),
@@ -1141,7 +1259,7 @@ impl FolderView {
             [
                 ld_segment(
                     "folder-export-scope-all",
-                    format!("All items ({})", format_size(counts.all as u64)),
+                    trf("All items ({})", &[&format_size(counts.all as u64)]),
                     o.scope == ReportScope::All,
                     false,
                     p,
@@ -1152,7 +1270,7 @@ impl FolderView {
                 ),
                 ld_segment(
                     "folder-export-scope-filtered",
-                    "As filtered now",
+                    tr("As filtered now"),
                     o.scope == ReportScope::Filtered,
                     false,
                     p,
@@ -1163,9 +1281,9 @@ impl FolderView {
                 ),
                 ld_segment(
                     "folder-export-scope-selected",
-                    format!(
+                    trf(
                         "Selected items only ({})",
-                        count_of(counts.selected as u64, "file", "files")
+                        &[&count_of(counts.selected as u64, "file", "files")],
                     ),
                     o.scope == ReportScope::Selected,
                     true,
@@ -1178,10 +1296,38 @@ impl FolderView {
             ],
             p,
         );
+        let lang = ld_segmented(
+            "folder-export-lang",
+            [
+                ld_segment(
+                    ("folder-export-lang", 0usize),
+                    "ไทย",
+                    o.lang == Lang::Th,
+                    false,
+                    p,
+                )
+                .ld_click(
+                    true,
+                    cx.listener(|this, _, window, cx| this.set_export_lang(Lang::Th, window, cx)),
+                ),
+                ld_segment(
+                    ("folder-export-lang", 1usize),
+                    "English",
+                    o.lang == Lang::En,
+                    true,
+                    p,
+                )
+                .ld_click(
+                    true,
+                    cx.listener(|this, _, window, cx| this.set_export_lang(Lang::En, window, cx)),
+                ),
+            ],
+            p,
+        );
         let details_label = if format == ReportFormat::Xlsx {
-            "Add a “Changed lines” sheet (one row per line)"
+            tr("Add a “Changed lines” sheet (one row per line)")
         } else {
-            "Show each file's differing lines"
+            tr("Show each file's differing lines")
         };
         let toggle = |id: &'static str,
                       label: &'static str,
@@ -1212,19 +1358,19 @@ impl FolderView {
                             h_flex()
                                 .items_center()
                                 .gap(px(6.))
-                                .child(div().text_color(p.muted).child("Context lines"))
+                                .child(div().text_color(p.muted).child(tr("Context lines")))
                                 .child(field(
                                     "folder-export-context",
                                     56.,
                                     &panel.fields.context,
-                                    "Context lines",
+                                    tr("Context lines"),
                                 )),
                         )
                     }),
             )
             .child(toggle(
                 "folder-export-mask",
-                "Hide values that look like passwords, keys or tokens (recommended before sharing)",
+                tr("Hide values that look like passwords, keys or tokens (recommended before sharing)"),
                 o.mask,
                 true,
                 |o| o.mask = !o.mask,
@@ -1232,14 +1378,14 @@ impl FolderView {
             .when(text_like, |list| {
                 list.child(toggle(
                     "folder-export-unimportant",
-                    "List files that differ only in unimportant parts (EOL, BOM, rules)",
+                    tr("List files that differ only in unimportant parts (EOL, BOM, rules)"),
                     o.unimportant,
                     true,
                     |o| o.unimportant = !o.unimportant,
                 ))
                 .child(toggle(
                     "folder-export-same",
-                    "List the same files too",
+                    tr("List the same files too"),
                     o.same,
                     true,
                     |o| o.same = !o.same,
@@ -1252,7 +1398,7 @@ impl FolderView {
                 .aria_label(text)
                 .text_size(px(11.5))
                 .text_color(p.dim)
-                .child(text)
+                .prose(text)
         };
         let fields = v_flex()
             .id("folder-export-fields")
@@ -1261,57 +1407,59 @@ impl FolderView {
             .overflow_y_scroll()
             .gap(px(8.))
             .child(row(
-                "Format",
+                tr("Format"),
                 v_flex().gap(px(4.)).children(formats).into_any_element(),
             ))
             .child(row(
-                "Name for the left side (A)",
+                tr("Name for the left side (A)"),
                 field(
                     "folder-export-name-a",
                     260.,
                     &panel.fields.names[0],
-                    "Name for the left side (A)",
+                    tr("Name for the left side (A)"),
                 ),
             ))
             .child(row(
-                "Name for the right side (B)",
+                tr("Name for the right side (B)"),
                 field(
                     "folder-export-name-b",
                     260.,
                     &panel.fields.names[1],
-                    "Name for the right side (B)",
+                    tr("Name for the right side (B)"),
                 ),
             ))
             .when(!csv, |body| {
                 body.child(row(
-                    "Report title",
+                    tr("Report title"),
                     field(
                         "folder-export-title",
                         420.,
                         &panel.fields.title,
-                        "Report title",
+                        tr("Report title"),
                     ),
                 ))
                 .child(row(
-                    "Note",
+                    tr("Note"),
                     div()
                         .id("folder-export-note")
                         .test_support()
                         .w(px(420.))
                         .font(fonts.ui.clone())
-                        .child(Textarea::new(&panel.fields.note))
+                        .child(ld_textarea(&panel.fields.note))
                         .into_any_element(),
                 ))
             })
-            .child(row("Scope", scope.into_any_element()))
+            .child(row(tr("Scope"), scope.into_any_element()))
+            .child(row(tr("Report language"), lang.into_any_element()))
+            .child(help("folder-export-help-lang", tr(LANG_HELP)))
             .when(!csv, |body| {
-                body.child(row("Contents", contents.into_any_element()))
+                body.child(row(tr("Contents"), contents.into_any_element()))
             })
             .when(table, |body| {
-                body.child(help("folder-export-help-table", TABLE_HELP))
+                body.child(help("folder-export-help-table", tr(TABLE_HELP)))
             })
             .when(!reads, |body| {
-                body.child(help("folder-export-help-criterion", CRITERION_HELP))
+                body.child(help("folder-export-help-criterion", tr(CRITERION_HELP)))
             });
         let body = v_flex()
             .id("folder-export-panel")
@@ -1334,21 +1482,23 @@ impl FolderView {
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_size(px(14.))
-                    .child("Create a report or export the compare"),
+                    .prose(tr("Create a report or export the compare")),
             )
             .child(fields)
             .child(
                 h_flex()
                     .justify_end()
                     .gap(px(8.))
-                    .child(ld_button("folder-export-cancel", "Cancel", p).ld_click(
+                    .child(ld_button("folder-export-cancel", tr("Cancel"), p).ld_click(
                         true,
                         cx.listener(|this, _, window, cx| this.close_export_in(window, cx)),
                     ))
-                    .child(ld_primary("folder-export-create", "Create", p).ld_click(
-                        true,
-                        cx.listener(|this, _, window, cx| this.start_export(window, cx)),
-                    )),
+                    .child(
+                        ld_primary("folder-export-create", tr("Create"), p).ld_click(
+                            true,
+                            cx.listener(|this, _, window, cx| this.start_export(window, cx)),
+                        ),
+                    ),
             );
         Some(
             div()
@@ -1373,6 +1523,23 @@ impl FolderView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_workbook_too_large_is_told_in_the_window_language() {
+        let path = Path::new("r.xlsx");
+        let english = export_notice(&Err(ExportError::TooLarge), path);
+        assert_eq!(
+            english,
+            "Can't export: The workbook is too large for the Excel format (over 4 GiB)."
+        );
+        let _th = scoped(Lang::Th);
+        let thai = export_notice(&Err(ExportError::TooLarge), path);
+        assert_ne!(thai, english);
+        assert!(
+            !thai.contains("workbook") && thai.contains("Excel"),
+            "{thai}"
+        );
+    }
 
     fn pair_names(list: &Value, pair: &str) -> Option<[String; 2]> {
         remembered_names(list, pair)

@@ -12,6 +12,11 @@ use gpui_kit::{
     TestAppContext, Window, WindowBounds, WindowOptions, point, px, size,
 };
 
+/// Help's language follows the UI's, and English is the default under test.
+fn thai_ui() -> duet_app::i18n::LangScope {
+    duet_app::i18n::scoped(duet_app::i18n::Lang::Th)
+}
+
 fn open_test_window<V: Render>(
     cx: &mut TestAppContext,
     build: impl FnOnce(&mut Window, &mut App) -> Entity<V>,
@@ -231,6 +236,7 @@ fn f1_opens_the_help_tab_once_also_from_a_start_box(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn the_help_opens_in_thai_without_a_saved_choice(cx: &mut TestAppContext) {
+    let _th = thai_ui();
     let data = tempfile::tempdir().unwrap();
     with_data_dir(cx, data.path());
     let (handle, workspace) = open(cx, Launch::Start);
@@ -247,6 +253,7 @@ fn the_help_opens_in_thai_without_a_saved_choice(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn the_language_switch_flips_every_string_keeps_the_topic_and_is_saved(cx: &mut TestAppContext) {
+    let _th = thai_ui();
     let data = tempfile::tempdir().unwrap();
     with_data_dir(cx, data.path());
     let (handle, workspace) = open(cx, Launch::Start);
@@ -293,7 +300,7 @@ fn the_language_switch_flips_every_string_keeps_the_topic_and_is_saved(cx: &mut 
     .unwrap();
     assert_page_reads(cx, handle, &help, HelpLang::En, "rules");
     assert_eq!(
-        duet_app::settings::get_string(&data.path().join("settings.json"), "help.lang").as_deref(),
+        duet_app::settings::get_string(&data.path().join("settings.json"), "ui.lang").as_deref(),
         Some("en")
     );
     // The empty message follows the language too.
@@ -305,7 +312,7 @@ fn the_language_switch_flips_every_string_keeps_the_topic_and_is_saved(cx: &mut 
     click(cx, handle, ("help-lang", 0usize));
     assert_eq!(label(cx, handle, "help-empty"), "ไม่พบหัวข้อที่ตรงกัน");
     assert_eq!(
-        duet_app::settings::get_string(&data.path().join("settings.json"), "help.lang").as_deref(),
+        duet_app::settings::get_string(&data.path().join("settings.json"), "ui.lang").as_deref(),
         Some("th")
     );
     click(cx, handle, ("help-lang", 1usize));
@@ -321,6 +328,7 @@ fn the_language_switch_flips_every_string_keeps_the_topic_and_is_saved(cx: &mut 
 
 #[gpui_kit::test]
 fn search_filters_the_topics_in_both_languages(cx: &mut TestAppContext) {
+    let _th = thai_ui();
     let (handle, workspace) = open(cx, Launch::Start);
     press(cx, handle, "f1");
     let help = active_help(&workspace, cx);
@@ -395,6 +403,7 @@ fn search_filters_the_topics_in_both_languages(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn the_topic_list_shows_its_groups_and_a_search_hides_an_empty_one(cx: &mut TestAppContext) {
+    let _th = thai_ui();
     let (handle, workspace) = open(cx, Launch::Start);
     press(cx, handle, "f1");
     let help = active_help(&workspace, cx);

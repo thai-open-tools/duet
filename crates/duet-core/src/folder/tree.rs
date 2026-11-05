@@ -84,9 +84,21 @@ pub struct FolderComparison {
     pub nodes: Vec<Node>,
     /// The rule the comparison was built with (R7).
     pub quick: QuickRule,
+    /// Node index to the index of its moved or renamed twin; both directions are present.
+    /// Built by `folder::moves` and empty otherwise.
+    pub moved: BTreeMap<u32, u32>,
 }
 
 impl FolderComparison {
+    pub fn moved_partner(&self, index: u32) -> Option<u32> {
+        self.moved.get(&index).copied()
+    }
+
+    /// Moved pairs (each pair is two rows).
+    pub fn moved_files(&self) -> usize {
+        self.moved.len() / 2
+    }
+
     /// A file pair on both sides whose modified times differ beyond `self.quick`.
     pub fn time_differs(&self, index: u32) -> bool {
         let node = &self.nodes[index as usize];
@@ -255,7 +267,9 @@ pub fn pair_status_with(left: Option<&Entry>, right: Option<&Entry>, rule: Quick
                     match (&l.link_target, &r.link_target) {
                         (Some(a), Some(b)) if a == b => Status::Same,
                         (Some(_), Some(_)) => Status::Different { newer: None },
-                        _ => Status::Error("cannot read the link target".into()),
+                        _ => {
+                            Status::Error(crate::i18n::tr_key("cannot read the link target").into())
+                        }
                     }
                 }
                 _ => quick_status_with(l, r, rule),

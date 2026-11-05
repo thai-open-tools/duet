@@ -11,6 +11,7 @@ use duet_app::ui::fonts::{Fonts, code_advance};
 use duet_app::workspace::{TabItem, Workspace};
 use duet_core::table::Delimiter;
 use duet_core::table::nav::Filter;
+use duet_core::table::xlsx::fixture::{Cell, SheetSpec, text, workbook};
 use gpui_kit::test::{TestAppContextExt, TestWindowExt};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, Bounds, ClipboardItem, Entity, Focusable, InputEvent as _,
@@ -1862,6 +1863,101 @@ async fn copy_row_gives_csv_with_the_comma(cx: &mut TestAppContext) {
     assert_eq!(clipboard(cx).as_deref(), Some("x,\"y,z\""));
 }
 
+/// A two-sheet workbook whose first sheet holds `rows`: a cell that reads as a number is one.
+fn write_workbook(dir: &Path, name: &str, rows: &[&[&str]]) -> PathBuf {
+    let mut first = SheetSpec::new("S");
+    for (r, row) in rows.iter().enumerate() {
+        for (c, cell) in row.iter().enumerate() {
+            let cell = cell.parse::<f64>().map_or_else(|_| text(cell), Cell::Num);
+            first.cells.push((r as u32 + 1, c as u32 + 1, cell));
+        }
+    }
+    let mut second = SheetSpec::new("T");
+    second.cells.push((1, 1, text("other")));
+    let path = dir.join(name);
+    std::fs::write(&path, workbook(&[first, second])).unwrap();
+    path
+}
+
+#[gpui_kit::test]
+async fn copy_row_on_a_workbook_gives_csv_of_what_the_sheet_shows(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let header: &[&str] = &["สินค้า", "n", "v"];
+    let a = write_workbook(dir.path(), "a.xlsx", &[header, &["กาแฟ", "1.5", "a,b"]]);
+    let b = write_workbook(dir.path(), "b.xlsx", &[header, &["กาแฟ", "2", "z"]]);
+    let (handle, view) = open_test_window(cx, move |window, cx| {
+        let view = cx.new(|cx| TableView::new(a, b, window, cx));
+        window.focus(&view.focus_handle(cx), cx);
+        view
+    });
+    wait_table(cx, handle, &view).await;
+    right_click_cell(cx, handle, &view, 0, true, 1);
+    assert!(run_item(cx, handle, &view, "Copy left row (CSV)"));
+    assert_eq!(clipboard(cx).as_deref(), Some("กาแฟ,1.5,\"a,b\""));
+    assert!(run_item(cx, handle, &view, "Copy left value"));
+    assert_eq!(clipboard(cx).as_deref(), Some("1.5"));
+    assert!(run_item(cx, handle, &view, "Copy right row (CSV)"));
+    assert_eq!(clipboard(cx).as_deref(), Some("กาแฟ,2,z"));
+}
+
+#[gpui_kit::test]
+async fn paste_on_a_workbook_side_drops_its_picker_and_an_open_brings_it_back(
+    cx: &mut TestAppContext,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let rows: &[&[&str]] = &[&["id", "v"], &["1", "x"]];
+    let a = write_workbook(dir.path(), "a.xlsx", rows);
+    let b = write_workbook(dir.path(), "b.xlsx", rows);
+    let c = write_workbook(dir.path(), "c.xlsx", rows);
+    let (handle, _workspace, view) = open_workspace(cx, a.clone(), b).await;
+    let paste = |cx: &mut TestAppContext| {
+        cx.update(|cx| cx.write_to_clipboard(ClipboardItem::new_string("id,v\n1,x\n".into())));
+        click(cx, handle, "table-paste-left");
+    };
+    let left = |cx: &mut TestAppContext| {
+        view.read_with(cx, |v, _| {
+            let side = v.side(true).unwrap();
+            (side.name.clone(), side.book.is_some())
+        })
+    };
+    draw(cx, handle);
+    assert!(
+        has_id(cx, handle, "table-sheet-left"),
+        "a workbook's picker"
+    );
+
+    paste(cx);
+    wait_table(cx, handle, &view).await;
+    draw(cx, handle);
+    assert_eq!(left(cx), ("Pasted text (left)".to_owned(), false));
+    assert!(!has_id(cx, handle, "table-sheet-left"), "pasted: no picker");
+    assert!(
+        has_id(cx, handle, "table-sheet-right"),
+        "the other side's stays"
+    );
+    assert!(view.read_with(cx, |v, _| v.side(false).unwrap().book.is_some()));
+
+    // The Open button and a dropped file go the same way (`open_side`): first its own workbook...
+    view.update(cx, |v, cx| v.drop_paths(std::slice::from_ref(&a), true, cx));
+    cx.run_until_parked();
+    wait_table(cx, handle, &view).await;
+    draw(cx, handle);
+    assert_eq!(left(cx), ("a.xlsx".to_owned(), true));
+    assert!(has_id(cx, handle, "table-sheet-left"), "its own file: back");
+
+    // ...then another one.
+    paste(cx);
+    wait_table(cx, handle, &view).await;
+    draw(cx, handle);
+    assert!(!has_id(cx, handle, "table-sheet-left"), "pasted again");
+    view.update(cx, |v, cx| v.drop_paths(std::slice::from_ref(&c), true, cx));
+    cx.run_until_parked();
+    wait_table(cx, handle, &view).await;
+    draw(cx, handle);
+    assert_eq!(left(cx), ("c.xlsx".to_owned(), true));
+    assert!(has_id(cx, handle, "table-sheet-left"), "another file: back");
+}
+
 async fn pick_export(
     cx: &mut TestAppContext,
     handle: AnyWindowHandle,
@@ -1947,12 +2043,45 @@ async fn export_is_disabled_without_a_comparison(cx: &mut TestAppContext) {
         )),
         ["(Differences (CSV))", "(HTML report)"]
     );
-    // The failed side says what to do next.
+    // The failed side says what to do next, and keeps its file name.
     assert!(
-        status(cx, &view).contains(&"Open the other side to start comparing.".to_owned()),
+        status(cx, &view)
+            .contains(&"b.csv could not be read. Open another file to start comparing.".to_owned()),
         "{:?}",
         status(cx, &view)
     );
+    assert_eq!(view.read_with(cx, |v, _| v.name_text(false)), "b.csv");
+}
+
+#[gpui_kit::test]
+async fn a_cancelled_open_leaves_the_label_with_the_tab_name(cx: &mut TestAppContext) {
+    let (dir, handle, view) = open_table(
+        cx, b"id
+1
+", b"id
+1
+",
+    );
+    wait_table(cx, handle, &view).await;
+    let (c, b) = (dir.path().join("c.csv"), dir.path().join("b.csv"));
+    std::fs::write(
+        &c, b"id
+1
+",
+    )
+    .unwrap();
+    view.update(cx, |v, cx| v.load_paths(c, b, cx));
+    press(cx, handle, "escape");
+    cx.run_until_parked();
+    view.read_with(cx, |v, _| {
+        assert!(!v.is_busy());
+        assert_eq!(v.paths().0.file_name().unwrap(), "c.csv");
+        assert_eq!(
+            v.name_text(true),
+            "c.csv",
+            "the label names the file the tab does"
+        );
+    });
 }
 
 #[gpui_kit::test]

@@ -6,15 +6,16 @@ use std::path::PathBuf;
 use gpui_kit::{AnyElement, ClickEvent, Context, ExternalPaths, SharedString, Window, prelude::*};
 
 use super::view::FolderView;
+use crate::i18n::{tr, tr_key, trf};
 use crate::palette::Palette;
 use crate::pathbar::{ActiveEdit, clean_typed, path_bar_click, path_input};
 
-pub const FILE_DROP_NOTICE: &str = "Drop folders here; files open in a text compare.";
+pub const FILE_DROP_NOTICE: &str = tr_key("Drop folders here; files open in a text compare.");
 
-const NOT_FULL_PATH: &str = "Type a full path, such as C:\\folder.";
+const NOT_FULL_PATH: &str = tr_key("Type a full path, such as C:\\folder.");
 
 fn not_a_folder(path: &str) -> SharedString {
-    format!("Not a folder: {path}.").into()
+    trf("Not a folder: {}.", &[&path]).into()
 }
 
 impl FolderView {
@@ -93,7 +94,7 @@ impl FolderView {
         let typed = clean_typed(&typed);
         let path = PathBuf::from(typed);
         if !typed.is_empty() && !path.is_absolute() {
-            self.notice = Some(NOT_FULL_PATH.into());
+            self.notice = Some(tr(NOT_FULL_PATH).into());
             cx.notify();
             return;
         }
@@ -139,7 +140,7 @@ impl FolderView {
             return;
         }
         if used.iter().any(|p| !p.is_dir()) {
-            self.notice = Some(FILE_DROP_NOTICE.into());
+            self.notice = Some(tr(FILE_DROP_NOTICE).into());
             cx.notify();
             return;
         }

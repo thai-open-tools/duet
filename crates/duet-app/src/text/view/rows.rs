@@ -11,6 +11,7 @@ use gpui_kit::{Background, Hsla, StyledText, TextLayout, UnderlineStyle, quad, t
 
 use super::stage::{NUMBER_CELL, TEXT_INSET};
 use super::*;
+use crate::i18n::{tr, tr_key, trf};
 use crate::text::display::{DisplayLine, MAX_WRAP_SEGMENTS, display_line, layer, wrap_line};
 use crate::ui::fonts::NUMBER_SIZE;
 use crate::ui::style::{ld_ghost, ld_tip};
@@ -756,16 +757,25 @@ fn moved_tag(
     down: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     p: &Palette,
 ) -> AnyElement {
-    let (id, arrow, other) = if left {
-        ("text-moved-left", '↷', "right")
+    let (id, arrow, tip) = if left {
+        (
+            "text-moved-left",
+            '↷',
+            tr_key(
+                "This line is on the right at line {}. Click to go there; drag to move this line.",
+            ),
+        )
     } else {
-        ("text-moved-right", '↶', "left")
+        (
+            "text-moved-right",
+            '↶',
+            tr_key(
+                "This line is on the left at line {}. Click to go there; drag to move this line.",
+            ),
+        )
     };
     let label = SharedString::from(format!("{arrow} {}", partner + 1));
-    let tip = SharedString::from(format!(
-        "This line is on the {other} at line {}. Click to go there; drag to move this line.",
-        partner + 1
-    ));
+    let tip = SharedString::from(trf(tip, &[&(partner + 1)]));
     div()
         .id((id, row))
         .test_support()
@@ -1043,7 +1053,7 @@ pub fn fold_row(
         .child(
             ld_ghost(
                 ("text-fold-more", display),
-                format!("Show {FOLD_STEP} more"),
+                trf("Show {} more", &[&FOLD_STEP]),
                 p,
             )
             .h(px(16.))
@@ -1055,7 +1065,7 @@ pub fn fold_row(
             ),
         )
         .child(
-            ld_ghost(("text-fold-all", display), "Show all", p)
+            ld_ghost(("text-fold-all", display), tr("Show all"), p)
                 .h(px(16.))
                 .px(px(6.))
                 .text_size(px(NUMBER_SIZE))

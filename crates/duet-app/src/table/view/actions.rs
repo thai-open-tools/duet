@@ -9,7 +9,8 @@ use gpui_kit::{ClipboardItem, ExternalPaths, MouseButton, MouseDownEvent};
 use super::*;
 use crate::table::menu::{
     TableAddKey, TableClearKeys, TableCopyLeftRow, TableCopyLeftValue, TableCopyRightRow,
-    TableCopyRightValue, TableExportCsv, TableExportHtml, TableUseKey,
+    TableCopyRightValue, TableExportCsv, TableExportHtml, TableReportLangEnglish,
+    TableReportLangThai, TableUseKey,
 };
 
 /// Where the last right press landed, which decides the menu the popup shows.
@@ -122,7 +123,7 @@ impl TableView {
 
     fn copy_text(&mut self, text: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.notice = Some("Copied.".into());
+        self.notice = Some(tr("Copied.").into());
         cx.notify();
     }
 
@@ -240,6 +241,16 @@ impl TableView {
             .on_action(cx.listener(|this, _: &TableExportHtml, w, cx| {
                 if this.takes_key(w, cx) {
                     this.export(true, w, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &TableReportLangThai, w, cx| {
+                if this.takes_key(w, cx) {
+                    this.set_report_lang(Lang::Th, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &TableReportLangEnglish, w, cx| {
+                if this.takes_key(w, cx) {
+                    this.set_report_lang(Lang::En, cx)
                 }
             }))
             .on_action(cx.listener(|this, _: &TableOpenLeft, w, cx| {

@@ -21,7 +21,7 @@ use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
     AnyElement, BackgroundExecutor, Context, FocusHandle, FontWeight, InteractiveElement,
-    PromptLevel, SharedString, Task, Window, actions, div, prelude::*, px,
+    PromptButton, PromptLevel, SharedString, Task, Window, actions, div, prelude::*, px,
 };
 
 use crate::folder::batch::{
@@ -29,9 +29,12 @@ use crate::folder::batch::{
 };
 use crate::folder::view::FolderView;
 use crate::format::{count_of, format_size};
+use crate::i18n::errors::{action_error, action_text};
+use crate::i18n::{self, LiveText, answers, live, scoped, tr, tr_key, trc, trf};
 use crate::job::JobSlot;
 use crate::palette::Palette;
 use crate::ui::fonts::Fonts;
+use crate::ui::prose::ProseExt as _;
 use crate::ui::style::{LdExt as _, ld_button, ld_card, ld_primary, ld_segment, ld_segmented};
 
 /// Which rows a sync covers (R15).
@@ -50,15 +53,27 @@ pub const CONTEXT: &str = "FolderSync";
 
 /// The answers of Start's two questions. "Cancel" is first, so Enter never replaces or
 /// deletes anything.
-pub const REPLACE_ANSWERS: [&str; 2] = ["Cancel", "Replace"];
-pub const TRASH_ANSWERS: [&str; 2] = ["Cancel", "Move to Recycle Bin"];
+pub const REPLACE_ANSWERS: [&str; 2] = [tr_key("Cancel"), tr_key("Replace")];
 
-const COMPARED_AGAIN: &str = "The folders were compared again, so the sync was closed.";
+/// The overwrite question's buttons, the order of `REPLACE_ANSWERS`. In Thai the second says
+/// "overwrite", as the question's detail does; find-replace keeps "Replace" as แทนที่.
+fn replace_buttons() -> Vec<PromptButton> {
+    vec![
+        PromptButton::cancel(tr("Cancel")),
+        PromptButton::new(trc("sync prompt", "Replace")),
+    ]
+}
+pub const TRASH_ANSWERS: [&str; 2] = [tr_key("Cancel"), tr_key("Move to Recycle Bin")];
+
+const COMPARED_AGAIN: &str = tr_key("The folders were compared again, so the sync was closed.");
 const STALE: &str =
-    "The folders changed while the question was open. Sync again to use the new view.";
-const NESTED: &str =
-    "One folder is inside the other, so sync is off: it could overwrite or delete its own source.";
-const HELP: &str = "Deleted files go to the Recycle Bin, where they can be restored. Copies keep their modified times. The current include and exclude masks apply.";
+    tr_key("The folders changed while the question was open. Sync again to use the new view.");
+const NESTED: &str = tr_key(
+    "One folder is inside the other, so sync is off: it could overwrite or delete its own source.",
+);
+const HELP: &str = tr_key(
+    "Deleted files go to the Recycle Bin, where they can be restored. Copies keep their modified times. The current include and exclude masks apply.",
+);
 
 /// Preview lines of each kind before "…" (LocalDiff `js:1115-1119`). The files a sync replaces
 /// get `COPY_LINES` of their own, ahead of the plain copies.
@@ -76,32 +91,36 @@ const MODES: [(SyncMode, &str, &str, &str); 5] = [
     (
         SyncMode::UpdateRight,
         "folder-sync-mode-update-right",
-        "Update right",
-        "Copies new files, and files newer on the left, to the right.",
+        tr_key("Update right"),
+        tr_key("Copies new files, and files newer on the left, to the right."),
     ),
     (
         SyncMode::UpdateLeft,
         "folder-sync-mode-update-left",
-        "Update left",
-        "Copies new files, and files newer on the right, to the left.",
+        tr_key("Update left"),
+        tr_key("Copies new files, and files newer on the right, to the left."),
     ),
     (
         SyncMode::UpdateBoth,
         "folder-sync-mode-update-both",
-        "Update both",
-        "The newer file wins, and files missing on either side are filled in.",
+        tr_key("Update both"),
+        tr_key("The newer file wins, and files missing on either side are filled in."),
     ),
     (
         SyncMode::MirrorRight,
         "folder-sync-mode-mirror-right",
-        "Mirror to right",
-        "Makes the right match the left (files that differ only in line endings or unimportant parts are left alone); extra files on the right go to the Recycle Bin.",
+        tr_key("Mirror to right"),
+        tr_key(
+            "Makes the right match the left (files that differ only in line endings or unimportant parts are left alone); extra files on the right go to the Recycle Bin.",
+        ),
     ),
     (
         SyncMode::MirrorLeft,
         "folder-sync-mode-mirror-left",
-        "Mirror to left",
-        "Makes the left match the right (files that differ only in line endings or unimportant parts are left alone); extra files on the left go to the Recycle Bin.",
+        tr_key("Mirror to left"),
+        tr_key(
+            "Makes the left match the right (files that differ only in line endings or unimportant parts are left alone); extra files on the left go to the Recycle Bin.",
+        ),
     ),
 ];
 
@@ -124,18 +143,41 @@ fn copy_lines<'a>(
             .filter(move |f| f.overwrites == replaces)
             .map(move |f| {
                 let rel = rel_under(root, &f.dst);
-                if replaces {
-                    format!("{arrow} {rel} (replaces)")
+                let line = if replaces {
+                    trf("{} {} (replaces)", &[&arrow, &rel])
                 } else {
                     format!("{arrow} {rel}")
+                };
+                match plan.moves.get(&rel) {
+                    Some(twin) => trf("{} (a move: {} goes to the Recycle Bin)", &[&line, twin]),
+                    None => line,
                 }
             });
         let folders = batch
             .mkdirs
             .iter()
             .filter(move |_| !replaces)
-            .map(move |d| format!("{arrow} {}/ (new folder)", rel_under(root, d)));
+            .map(move |d| trf("{} {}/ (new folder)", &[&arrow, &rel_under(root, d)]));
         files.chain(folders)
+    })
+}
+
+/// Whether a preview line is one of the two move lines, which hold two paths and a sentence:
+/// those wrap in the panel, the others stay on one line. Found by the fixed words between the
+/// two paths, in the language the line was said in.
+pub fn is_move_line(line: &str) -> bool {
+    [
+        tr_key("{} (a move: {} goes to the Recycle Bin)"),
+        tr_key("{} (a move: copied as {})"),
+    ]
+    .into_iter()
+    .any(|template| {
+        let template = tr(template);
+        let mut parts = template.split("{}");
+        let (_, Some(middle)) = (parts.next(), parts.next()) else {
+            return false;
+        };
+        line.contains(middle)
     })
 }
 
@@ -160,12 +202,16 @@ pub fn sync_lines(
             .get(path)
             .is_some_and(|s| s.kind == EntryKind::Dir);
         let slash = if folder { "/" } else { "" };
-        format!("✕ {}{slash}", rel_under(trash_root, path))
+        let line = format!("✕ {}{slash}", rel_under(trash_root, path));
+        match plan.moves.get(&rel_under(trash_root, path)) {
+            Some(twin) if slash.is_empty() => trf("{} (a move: copied as {})", &[&line, twin]),
+            _ => line,
+        }
     });
     let skips = plan
         .skips
         .iter()
-        .map(|s| format!("· {} — {}", s.rel, s.why.text_in(mode)));
+        .map(|s| format!("· {} — {}", s.rel, tr(s.why.text_in(mode))));
     let mut lines: Vec<String> = replaced
         .take(COPY_LINES)
         .chain(added.take(COPY_LINES))
@@ -186,26 +232,33 @@ pub fn sync_lines(
 /// The counts above the preview. A plan with nothing to do and nothing skipped says so.
 pub fn sync_summary(plan: &SyncPlan) -> String {
     if plan.is_empty() && plan.skips.is_empty() {
-        return "Nothing to do: the two sides already match for this mode.".into();
+        return tr("Nothing to do: the two sides already match for this mode.").into();
     }
     let replaces = match plan.overwrites() {
         0 => String::new(),
-        1 => "; 1 replaces an existing file".into(),
-        n => format!("; {} replace existing files", format_size(n as u64)),
+        1 => tr("; 1 replaces an existing file").into(),
+        n => trf("; {} replace existing files", &[&format_size(n as u64)]),
     };
-    let mut text = format!(
-        "Copy {} ({}{replaces})",
-        count_of(plan.files() as u64, "file", "files"),
-        count_of(plan.bytes(), "byte", "bytes")
+    let mut text = trf(
+        "Copy {} ({}{})",
+        &[
+            &count_of(plan.files() as u64, "file", "files"),
+            &count_of(plan.bytes(), "byte", "bytes"),
+            &replaces,
+        ],
     );
     if plan.folders() > 0 {
         let folders = count_of(plan.folders() as u64, "folder", "folders");
-        text.push_str(&format!(" · Create {folders}"));
+        text.push_str(&trf(" · Create {}", &[&folders]));
     }
     let moves = count_of(plan.trash.len() as u64, "item", "items");
-    text.push_str(&format!(" · Move {moves} to the Recycle Bin"));
+    text.push_str(&trf(" · Move {} to the Recycle Bin", &[&moves]));
     if !plan.skips.is_empty() {
-        text.push_str(&format!(" · Skip {}", format_size(plan.skips.len() as u64)));
+        text.push_str(&trf(" · Skip {}", &[&format_size(plan.skips.len() as u64)]));
+    }
+    if !plan.moves.is_empty() {
+        let pairs = count_of((plan.moves.len() / 2) as u64, "move", "moves");
+        text.push_str(&format!(" · {pairs}"));
     }
     text
 }
@@ -215,7 +268,7 @@ fn join_list(parts: &[String]) -> String {
     match parts {
         [] => String::new(),
         [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        [rest @ .., last] => trf("{} and {}", &[&rest.join(", "), last]),
     }
 }
 
@@ -229,13 +282,15 @@ pub fn sync_result(report: &SyncReport, plan: &SyncPlan) -> String {
             .map(|r| r.done + r.failed.len())
             .sum();
         let total = plan.files() + plan.folders() + plan.trash.len();
-        let mut text = format!(
+        let mut text = trf(
             "Sync cancelled after {} of {}.",
-            format_size(tried as u64),
-            count_of(total as u64, "item", "items")
+            &[
+                &format_size(tried as u64),
+                &count_of(total as u64, "item", "items"),
+            ],
         );
         if !plan.trash.is_empty() && moved == 0 {
-            text.push_str(" Nothing went to the Recycle Bin.");
+            text.push_str(tr(" Nothing went to the Recycle Bin."));
         }
         return text;
     }
@@ -247,28 +302,31 @@ pub fn sync_result(report: &SyncReport, plan: &SyncPlan) -> String {
     let to_bin = !plan.trash.is_empty() || report.trash.is_some();
     let mut parts = Vec::new();
     if plan.files() > 0 || (plan.folders() == 0 && !to_bin) {
-        parts.push(format!(
+        parts.push(trf(
             "copied {}",
-            count_of(files as u64, "file", "files")
+            &[&count_of(files as u64, "file", "files")],
         ));
     }
     if plan.folders() > 0 {
         let made = count_of(folders as u64, "folder", "folders");
-        parts.push(format!("created {made}"));
+        parts.push(trf("created {}", &[&made]));
     }
     if to_bin {
         let items = count_of(moved as u64, "item", "items");
-        parts.push(format!("moved {items} to the Recycle Bin"));
+        parts.push(trf("moved {} to the Recycle Bin", &[&items]));
     }
-    let head = format!("Synced: {}", join_list(&parts));
+    let head = trf("Synced: {}", &[&join_list(&parts)]);
     let failed = report.failed();
     match failed.first() {
-        None => format!("{head}."),
-        Some((path, err)) => format!(
-            "{head}; {} failed: {}: {}.",
-            format_size(failed.len() as u64),
-            path.display(),
-            err.trim_end_matches('.')
+        None => trf("{}.", &[&head]),
+        Some((path, err)) => trf(
+            "{}; {} failed: {}: {}.",
+            &[
+                &head,
+                &format_size(failed.len() as u64),
+                &path.display(),
+                &action_text(err).trim_end_matches('.'),
+            ],
         ),
     }
 }
@@ -278,27 +336,30 @@ pub fn sync_result(report: &SyncReport, plan: &SyncPlan) -> String {
 /// disk at Start), and up to `REPLACED_LISTED` paths, the newer ones first: an overwrite is
 /// the one thing a sync cannot undo, so the question names them all but for a huge plan.
 pub fn sync_overwrite_prompt(plan: &SyncPlan, newer: &HashSet<PathBuf>) -> (String, String) {
-    let message = format!(
+    let message = trf(
         "Replace {}?",
-        count_of(plan.overwrites() as u64, "file", "files")
+        &[&count_of(plan.overwrites() as u64, "file", "files")],
     );
-    let detail = [(&plan.to_right, "right"), (&plan.to_left, "left")]
-        .into_iter()
-        .filter_map(|(batch, side)| {
-            let conflicts: Vec<Conflict> = batch
-                .files
-                .iter()
-                .filter(|f| f.overwrites)
-                .map(|f| Conflict {
-                    path: f.dst.clone(),
-                    destination_newer: newer.contains(&f.dst),
-                })
-                .collect();
-            (!conflicts.is_empty())
-                .then(|| overwrite_lines(conflicts.len(), &conflicts, side, REPLACED_LISTED))
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    let detail = [
+        (&plan.to_right, tr_key("right")),
+        (&plan.to_left, tr_key("left")),
+    ]
+    .into_iter()
+    .filter_map(|(batch, side)| {
+        let conflicts: Vec<Conflict> = batch
+            .files
+            .iter()
+            .filter(|f| f.overwrites)
+            .map(|f| Conflict {
+                path: f.dst.clone(),
+                destination_newer: newer.contains(&f.dst),
+            })
+            .collect();
+        (!conflicts.is_empty())
+            .then(|| overwrite_lines(conflicts.len(), &conflicts, side, REPLACED_LISTED))
+    })
+    .collect::<Vec<_>>()
+    .join("\n\n");
     (message, detail)
 }
 
@@ -306,10 +367,17 @@ pub fn sync_overwrite_prompt(plan: &SyncPlan, newer: &HashSet<PathBuf>) -> (Stri
 /// note on the folders that stay.
 pub fn sync_trash_prompt(plan: &SyncPlan) -> (String, String) {
     let side = plan.trash_side.unwrap_or(Side::Right);
-    let name = if side == Side::Left { "left" } else { "right" };
-    let message = format!(
-        "Move {} on the {name} to the Recycle Bin?",
-        count_of(plan.trash.len() as u64, "item", "items")
+    let name = if side == Side::Left {
+        tr_key("left")
+    } else {
+        tr_key("right")
+    };
+    let message = trf(
+        "Move {} on the {} to the Recycle Bin?",
+        &[
+            &count_of(plan.trash.len() as u64, "item", "items"),
+            &tr(name),
+        ],
     );
     let kept_folders = plan
         .skips
@@ -526,11 +594,11 @@ impl FolderView {
             return true;
         }
         let why = if self.is_busy() {
-            Some("Wait for the compare to finish.")
+            Some(tr("Wait for the compare to finish."))
         } else if !self.result_ready() {
-            Some("Compare the folders first.")
+            Some(tr("Compare the folders first."))
         } else if self.sync.nested {
-            Some(NESTED)
+            Some(tr(NESTED))
         } else {
             None
         };
@@ -612,10 +680,13 @@ impl FolderView {
         let mode = panel.mode;
         let (left, right) = (self.left.clone(), self.right.clone());
         let background = cx.background_executor().clone();
+        let lang = i18n::current();
         panel.task = Some(cx.spawn(async move |this, cx| {
             let s = snap.clone();
             let (plan, summary, lines) = background
                 .spawn(async move {
+                    // The texts are said in the language the plan was asked for in.
+                    let _lang = scoped(lang);
                     let plan = s.sync_plan(mode);
                     let summary = sync_summary(&plan);
                     let lines = sync_lines(&plan, &left, &right, criterion);
@@ -633,11 +704,25 @@ impl FolderView {
                         summary: summary.into(),
                         lines,
                     });
+                    // A switch while the plan was worked out: say it again in the new language.
+                    if i18n::current() != lang {
+                        view.relabel_sync();
+                    }
                     cx.notify();
                 }
             });
         }));
         cx.notify();
+    }
+
+    /// The language changed: the open panel's summary and preview lines are said again from the
+    /// plan on show. The panel, its mode and its scope stay as they are.
+    pub(super) fn relabel_sync(&mut self) {
+        let (left, right, criterion) = (self.left.clone(), self.right.clone(), self.options().mode);
+        if let Some(shown) = self.sync.panel.as_mut().and_then(|p| p.shown.as_mut()) {
+            shown.summary = sync_summary(&shown.plan).into();
+            shown.lines = sync_lines(&shown.plan, &left, &right, criterion);
+        }
     }
 
     /// Closes the panel. Without a window at hand, the next frame gives the rows the focus if
@@ -663,7 +748,7 @@ impl FolderView {
     pub(super) fn close_sync_for_compare(&mut self, cx: &mut Context<Self>) {
         if self.sync.panel.is_some() {
             self.close_sync(cx);
-            self.notice = Some(COMPARED_AGAIN.into());
+            self.notice = Some(tr(COMPARED_AGAIN).into());
         }
     }
 
@@ -699,7 +784,7 @@ impl FolderView {
         let (plan, snap, mode, id) = (shown.plan.clone(), shown.snap.clone(), panel.mode, panel.id);
         if panel.epoch != self.plan_epoch {
             self.close_sync_in(window, cx);
-            self.notice = Some(COMPARED_AGAIN.into());
+            self.notice = Some(tr(COMPARED_AGAIN).into());
             return;
         }
         if self.refuse_sync(cx) {
@@ -724,12 +809,16 @@ impl FolderView {
                     // Again here, off the UI thread: a root may have become a link into the
                     // other since the compare.
                     if roots_overlap(&l, &r) {
-                        return Err(NESTED.to_owned());
+                        return Err(live(NESTED));
                     }
                     let checks = check(&r, &p.to_right).and_then(|to_right| {
                         check(&l, &p.to_left).map(|to_left| (to_right, to_left))
                     });
-                    checks.map_err(|err| format!("Nothing was synced: {err}."))
+                    checks.map_err(|err| {
+                        LiveText::new(move || {
+                            trf("Nothing was synced: {}.", &[&action_error(&err)])
+                        })
+                    })
                 })
                 .await;
             let newer: HashSet<PathBuf> = match checked {
@@ -739,9 +828,10 @@ impl FolderView {
                     .filter(|c| c.destination_newer)
                     .map(|c| c.path)
                     .collect(),
-                Err(notice) => {
+                Err(mut notice) => {
                     let _ = this.update(cx, |view, cx| {
-                        view.notice = Some(notice.into());
+                        notice.relabel();
+                        view.notice = Some((&notice).into());
                         cx.notify();
                     });
                     return;
@@ -749,14 +839,14 @@ impl FolderView {
             };
             let mut questions = Vec::new();
             if plan.overwrites() > 0 {
-                questions.push((sync_overwrite_prompt(&plan, &newer), REPLACE_ANSWERS));
+                questions.push((sync_overwrite_prompt(&plan, &newer), replace_buttons()));
             }
             if !plan.trash.is_empty() {
-                questions.push((sync_trash_prompt(&plan), TRASH_ANSWERS));
+                questions.push((sync_trash_prompt(&plan), answers(&TRASH_ANSWERS)));
             }
-            for ((message, detail), answers) in questions {
+            for ((message, detail), buttons) in questions {
                 let Ok(answer) = this.update_in(cx, |_, window, cx| {
-                    window.prompt(PromptLevel::Warning, &message, Some(&detail), &answers, cx)
+                    window.prompt(PromptLevel::Warning, &message, Some(&detail), &buttons, cx)
                 }) else {
                     return;
                 };
@@ -783,7 +873,7 @@ impl FolderView {
     ) {
         if self.plan_epoch != run.epoch {
             self.close_sync_in(window, cx);
-            self.notice = Some(COMPARED_AGAIN.into());
+            self.notice = Some(tr(COMPARED_AGAIN).into());
             cx.notify();
             return;
         }
@@ -796,7 +886,7 @@ impl FolderView {
         }
         self.close_sync_in(window, cx);
         let total = run.asked.files() + run.asked.folders() + run.asked.trash.len();
-        let (cancel, done) = self.start_batch("Syncing", total, cx);
+        let (cancel, done) = self.start_batch(tr_key("Syncing"), total, cx);
         cx.spawn_in(window, async move |this, cx| {
             let outcome = background
                 .spawn(async move { replan_and_run(&run, &cancel, &done) })
@@ -804,7 +894,7 @@ impl FolderView {
             let _ = this.update_in(cx, |view, window, cx| {
                 let (notice, failed) = match &outcome {
                     Some((report, plan)) => (sync_result(report, plan), report.failed()),
-                    None => (STALE.to_owned(), Vec::new()),
+                    None => (tr(STALE).to_owned(), Vec::new()),
                 };
                 view.finish_batch(notice, &failed, window, cx);
             });
@@ -830,7 +920,7 @@ impl FolderView {
         let picked = panel.picked;
         let shown = panel.shown.as_ref();
         let summary = shown.map_or_else(
-            || SharedString::from("Working out what to do…"),
+            || SharedString::from(tr("Working out what to do…")),
             |s| s.summary.clone(),
         );
         let can_start = shown.is_some_and(|s| !s.plan.is_empty());
@@ -838,7 +928,7 @@ impl FolderView {
             .iter()
             .map(|&(mode, id, title, text)| {
                 let on = panel.mode == mode;
-                ld_card(id, title, p)
+                ld_card(id, tr(title), p)
                     .flex()
                     .flex_col()
                     .flex_1()
@@ -849,8 +939,8 @@ impl FolderView {
                     .rounded(px(8.))
                     .when(on, |card| card.border_color(p.accent).bg(p.panel3))
                     .aria_selected(on)
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-                    .child(div().text_size(px(11.)).text_color(p.dim).child(text))
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child(tr(title)))
+                    .child(div().text_size(px(11.)).text_color(p.dim).prose(tr(text)))
                     .ld_click(
                         true,
                         cx.listener(move |this, _, _, cx| this.set_sync_mode(mode, cx)),
@@ -862,7 +952,7 @@ impl FolderView {
             [
                 ld_segment(
                     "folder-sync-scope-all",
-                    "Whole folder",
+                    tr("Whole folder"),
                     panel.scope == SyncScope::All,
                     false,
                     p,
@@ -873,7 +963,7 @@ impl FolderView {
                 ),
                 ld_segment(
                     "folder-sync-scope-selected",
-                    format!("Selected items only ({})", format_size(picked as u64)),
+                    trf("Selected items only ({})", &[&format_size(picked as u64)]),
                     panel.scope == SyncScope::Selected,
                     true,
                     p,
@@ -900,15 +990,21 @@ impl FolderView {
                 .bg(p.panel2)
                 .font(fonts.code.clone())
                 .text_size(px(11.5))
-                .children(s.lines.iter().map(|line| {
+                .children(s.lines.iter().enumerate().map(|(i, line)| {
                     let color = match line.chars().next() {
                         Some('→' | '←') => p.ins,
                         Some('✕') => p.del,
                         _ => p.dim,
                     };
+                    // A move line holds two paths and a sentence: it wraps instead of running
+                    // out of the 760 px panel.
+                    let wraps = is_move_line(line);
                     div()
+                        .id(("folder-sync-line", i))
+                        .test_support()
                         .text_color(color)
-                        .whitespace_nowrap()
+                        .when(wraps, |d| d.whitespace_normal())
+                        .when(!wraps, |d| d.whitespace_nowrap())
                         .child(line.clone())
                 }))
         });
@@ -934,7 +1030,7 @@ impl FolderView {
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_size(px(14.))
-                    .child("Sync folders"),
+                    .child(tr("Sync folders")),
             )
             .child(
                 v_flex()
@@ -950,23 +1046,25 @@ impl FolderView {
                             .id("folder-sync-summary")
                             .test_support()
                             .aria_label(summary.clone())
-                            .child(summary),
+                            .prose(summary),
                     )
                     .children(list)
-                    .child(div().text_size(px(11.5)).text_color(p.dim).child(HELP)),
+                    .child(div().text_size(px(11.5)).text_color(p.dim).prose(tr(HELP))),
             )
             .child(
                 h_flex()
                     .justify_end()
                     .gap(px(8.))
-                    .child(ld_button("folder-sync-cancel", "Cancel", p).ld_click(
+                    .child(ld_button("folder-sync-cancel", tr("Cancel"), p).ld_click(
                         true,
                         cx.listener(|this, _, window, cx| this.close_sync_in(window, cx)),
                     ))
-                    .child(ld_primary("folder-sync-start", "Start sync", p).ld_click(
-                        can_start,
-                        cx.listener(|this, _, window, cx| this.start_sync(window, cx)),
-                    )),
+                    .child(
+                        ld_primary("folder-sync-start", tr("Start sync"), p).ld_click(
+                            can_start,
+                            cx.listener(|this, _, window, cx| this.start_sync(window, cx)),
+                        ),
+                    ),
             );
         Some(
             div()
@@ -1019,6 +1117,24 @@ mod tests {
         SyncSkip {
             rel: rel.into(),
             why,
+        }
+    }
+
+    fn move_plan(moves: &[(&str, &str)]) -> SyncPlan {
+        SyncPlan {
+            to_right: batch(vec![item("new/a.txt", 1, false, true)], vec![]),
+            trash: vec![Path::new("R").join("old").join("a.txt")],
+            trash_side: Some(Side::Right),
+            moves: moves
+                .iter()
+                .flat_map(|(a, b)| {
+                    [
+                        (a.to_string(), b.to_string()),
+                        (b.to_string(), a.to_string()),
+                    ]
+                })
+                .collect(),
+            ..SyncPlan::default()
         }
     }
 
@@ -1497,5 +1613,87 @@ mod tests {
             sync_result(&report, &plan),
             "Sync cancelled after 0 of 1 item. Nothing went to the Recycle Bin."
         );
+    }
+
+    #[test]
+    fn sync_lines_name_the_pairs_that_are_moves() {
+        let plan = move_plan(&[("new/a.txt", "old/a.txt")]);
+        assert_eq!(
+            sync_lines(&plan, Path::new("L"), Path::new("R"), CompareMode::Content),
+            [
+                "→ new/a.txt (a move: old/a.txt goes to the Recycle Bin)",
+                "✕ old/a.txt (a move: copied as new/a.txt)",
+            ]
+        );
+        let leftward = SyncPlan {
+            to_left: batch(vec![item("b.txt", 1, false, false)], vec![]),
+            trash: vec![Path::new("L").join("c.txt")],
+            trash_side: Some(Side::Left),
+            moves: [
+                ("b.txt".to_owned(), "c.txt".to_owned()),
+                ("c.txt".to_owned(), "b.txt".to_owned()),
+            ]
+            .into(),
+            ..SyncPlan::default()
+        };
+        assert_eq!(
+            sync_lines(
+                &leftward,
+                Path::new("L"),
+                Path::new("R"),
+                CompareMode::Content
+            )[0],
+            "← b.txt (a move: c.txt goes to the Recycle Bin)"
+        );
+    }
+
+    #[test]
+    fn only_the_move_lines_are_let_wrap() {
+        for (line, wraps) in [
+            (
+                "→ new/a.txt (a move: old/a.txt goes to the Recycle Bin)",
+                true,
+            ),
+            ("✕ old/a.txt (a move: copied as new/a.txt)", true),
+            ("→ new/a.txt", false),
+            ("→ new/a.txt (replaces)", false),
+            ("✕ old/a.txt", false),
+            ("· x — it could not be read", false),
+        ] {
+            assert_eq!(is_move_line(line), wraps, "{line}");
+        }
+        let _th = crate::i18n::scoped(crate::i18n::Lang::Th);
+        assert!(is_move_line("→ new/a.txt (ย้าย: old/a.txt ไปถังขยะ)"));
+        assert!(is_move_line("✕ old/a.txt (ย้าย: คัดลอกเป็น new/a.txt)"));
+        assert!(!is_move_line("→ new/a.txt"));
+    }
+
+    #[test]
+    fn sync_summary_counts_moves_after_the_other_parts() {
+        let one = sync_summary(&move_plan(&[("new/a.txt", "old/a.txt")]));
+        assert!(
+            one.ends_with(" · Move 1 item to the Recycle Bin · 1 move"),
+            "{one}"
+        );
+        let none = sync_summary(&move_plan(&[]));
+        assert!(
+            !none.contains("move") || none.ends_with("Recycle Bin"),
+            "{none}"
+        );
+        let mut three = move_plan(&[("a", "b"), ("c", "d"), ("e", "f")]);
+        three.moves.insert("x".into(), "y".into());
+        three.moves.insert("y".into(), "x".into());
+        assert!(sync_summary(&three).ends_with(" · 4 moves"));
+    }
+
+    #[test]
+    fn the_moved_lines_have_thai_text() {
+        let _th = crate::i18n::scoped(crate::i18n::Lang::Th);
+        let plan = move_plan(&[("new/a.txt", "old/a.txt")]);
+        let lines = sync_lines(&plan, Path::new("L"), Path::new("R"), CompareMode::Content);
+        assert_eq!(lines[0], "→ new/a.txt (ย้าย: old/a.txt ไปถังขยะ)");
+        assert_eq!(lines[1], "✕ old/a.txt (ย้าย: คัดลอกเป็น new/a.txt)");
+        assert!(sync_summary(&plan).ends_with(" · 1 คู่ที่ย้าย"));
+        assert!(crate::i18n::missing_keys_for_test().is_empty());
     }
 }

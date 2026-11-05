@@ -17,6 +17,7 @@ use crate::folder::entry::EntryKind;
 use crate::folder::report::mask::mask_lines;
 use crate::folder::report::{ReportItem, SideFacts};
 use crate::folder::run::FolderTextRules;
+use crate::i18n::{tr, tr_key, trf};
 use crate::text::diff::{DiffError, DiffInput, DiffOptions};
 use crate::text::encoding::{decode, is_binary};
 use crate::text::inline;
@@ -148,13 +149,16 @@ impl Default for LineOptions {
 }
 
 const NOTE_BIG: &str =
-    "The file is larger than 8 MiB: no lines are shown (open it in duet to see them).";
-const NOTE_BINARY: &str = "Binary file: compare it in duet's hex view.";
-const NOTE_UNREADABLE: &str = "Could not read the file.";
-const NOTE_NOT_PLAIN: &str = "Only plain files are read: no lines are shown.";
-const NOTE_NO_LINES: &str = "No differing lines under the current text compare rules (only parts set to be ignored differ).";
-const NOTE_LIMIT: &str = "The report reached its size limit: no lines are shown for this file.";
-const NOTE_COMPARE: &str = "Could not compare the file.";
+    tr_key("The file is larger than 8 MiB: no lines are shown (open it in duet to see them).");
+const NOTE_BINARY: &str = tr_key("Binary file: compare it in duet's hex view.");
+const NOTE_UNREADABLE: &str = tr_key("Could not read the file.");
+const NOTE_NOT_PLAIN: &str = tr_key("Only plain files are read: no lines are shown.");
+const NOTE_NO_LINES: &str = tr_key(
+    "No differing lines under the current text compare rules (only parts set to be ignored differ).",
+);
+const NOTE_LIMIT: &str =
+    tr_key("The report reached its size limit: no lines are shown for this file.");
+const NOTE_COMPARE: &str = tr_key("Could not compare the file.");
 
 enum ReadFail {
     NotPlain,
@@ -166,10 +170,10 @@ enum ReadFail {
 impl ReadFail {
     fn note(&self) -> &'static str {
         match self {
-            ReadFail::NotPlain => NOTE_NOT_PLAIN,
-            ReadFail::Big => NOTE_BIG,
-            ReadFail::Binary => NOTE_BINARY,
-            ReadFail::Unreadable => NOTE_UNREADABLE,
+            ReadFail::NotPlain => tr(NOTE_NOT_PLAIN),
+            ReadFail::Big => tr(NOTE_BIG),
+            ReadFail::Binary => tr(NOTE_BINARY),
+            ReadFail::Unreadable => tr(NOTE_UNREADABLE),
         }
     }
 }
@@ -298,7 +302,7 @@ fn one_file(
     cancel: &CancelToken,
 ) -> Outcome {
     let (Some(left), Some(right)) = (&item.left, &item.right) else {
-        return note_only(NOTE_UNREADABLE);
+        return note_only(tr(NOTE_UNREADABLE));
     };
     let bytes = match (read_side(left), read_side(right)) {
         (Ok(l), Ok(r)) => [l, r],
@@ -338,7 +342,7 @@ fn one_file(
     ) {
         Ok((diff, _)) => diff,
         Err(DiffError::Cancelled(_)) => return Outcome::Cancelled,
-        Err(DiffError::TooManyLines(_)) => return note_only(NOTE_COMPARE),
+        Err(DiffError::TooManyLines(_)) => return note_only(tr(NOTE_COMPARE)),
     };
     let map = RowMap::new(&diff);
     let classes = row_classes(&map, &lines);
@@ -359,13 +363,13 @@ fn one_file(
     }
     if opts.rows {
         if *total_left == 0 {
-            info.note = Some(NOTE_LIMIT.to_owned());
+            info.note = Some(tr(NOTE_LIMIT).to_owned());
         } else {
             let cap = opts.file_rows.min(*total_left);
             let (rows, shown) = detail_rows(&map, &classes, &lines, opts.context, cap);
             *total_left -= shown;
             if shown == 0 {
-                info.note = Some(NOTE_NO_LINES.to_owned());
+                info.note = Some(tr(NOTE_NO_LINES).to_owned());
             } else {
                 info.rows = rows;
             }
@@ -541,22 +545,22 @@ pub fn line_summary(info: &LineInfo, names: &[String; 2]) -> String {
     }
     let mut parts = Vec::new();
     if info.changed > 0 {
-        parts.push(format!("{} changed", number(info.changed)));
+        parts.push(trf("{} changed", &[&number(info.changed)]));
     }
     if info.left_only > 0 {
-        parts.push(format!("{} only in {}", number(info.left_only), names[0]));
+        parts.push(trf("{} only in {}", &[&number(info.left_only), &names[0]]));
     }
     if info.right_only > 0 {
-        parts.push(format!("{} only in {}", number(info.right_only), names[1]));
+        parts.push(trf("{} only in {}", &[&number(info.right_only), &names[1]]));
     }
     if parts.is_empty() {
         return if info.soft > 0 {
-            "Differs only in unimportant parts".to_owned()
+            tr("Differs only in unimportant parts").to_owned()
         } else {
             String::new()
         };
     }
-    let mut text = format!("Lines: {}", parts.join(" · "));
+    let mut text = trf("Lines: {}", &[&parts.join(" · ")]);
     if info.places > 1 {
         text.push_str(&format!(
             " ({})",

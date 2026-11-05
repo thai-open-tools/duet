@@ -25,12 +25,14 @@ use gpui_kit::{
     prelude::*, px,
 };
 
+use crate::i18n::{LiveText, live, tr, tr_key, trf};
 use crate::job::JobSlot;
 use crate::palette::Palette;
 use crate::pathbar::ActiveEdit;
 use crate::probe::ScrollProbe;
 use crate::settings;
 use crate::ui::fonts::{Fonts, UI_SIZE};
+use crate::ui::prose::ProseExt as _;
 use select::Step;
 
 // The find bar lives beside this folder, as `hex/find.rs`, but is a child module so it can
@@ -93,18 +95,18 @@ pub const BYTES_PER_ROW: [u64; 3] = [8, 16, 32];
 pub const BYTES_PER_ROW_KEY: &str = "hex.bytes_per_row";
 const DEFAULT_BYTES_PER_ROW: u64 = 16;
 
-const OPEN_HINT: &str = "Press F5 to try again.";
-const NO_MORE: &str = "No more differences.";
+const OPEN_HINT: &str = tr_key("Press F5 to try again.");
+const NO_MORE: &str = tr_key("No more differences.");
 /// A cursor and a selection (side, offset or range) that F9 keeps across the reopen.
 type Carry = (Option<(bool, u64)>, Option<(bool, Range<u64>)>);
 
-const STILL_COMPARING: &str = "Still comparing…";
-const CANCELLED: &str = "Cancelled: the result is incomplete.";
-const SHOWING_ALL: &str = "Showing all rows to reach that offset.";
-const BAD_OFFSET: &str = "Type an offset such as 0x1F40, 1F40h or 8000.";
-const PAST_END: &str = "Past the end: went to the last byte.";
+const STILL_COMPARING: &str = tr_key("Still comparing…");
+const CANCELLED: &str = tr_key("Cancelled: the result is incomplete.");
+const SHOWING_ALL: &str = tr_key("Showing all rows to reach that offset.");
+const BAD_OFFSET: &str = tr_key("Type an offset such as 0x1F40, 1F40h or 8000.");
+const PAST_END: &str = tr_key("Past the end: went to the last byte.");
 const TRUNCATED_NOTICE: &str =
-    "More than 200,000 differences: navigation covers the first 200,000.";
+    tr_key("More than 200,000 differences: navigation covers the first 200,000.");
 /// How often the status line's progress is redrawn while comparing.
 const PROGRESS_TICK: Duration = Duration::from_millis(250);
 
@@ -179,10 +181,14 @@ enum Load {
     Opened(Arc<HexPair>),
 }
 
-/// Opens both files. An open error names the side that failed.
-fn open(left: &Path, right: &Path) -> Result<HexPair, String> {
+/// Opens both files. An open error names the side that failed; it is built from data, so a
+/// switch of language says it again (`LiveText::relabel`).
+fn open(left: &Path, right: &Path) -> Result<HexPair, LiveText> {
     let open = |path: &Path| {
-        HexSource::open(path).map_err(|err| format!("Can't open {}: {err}.", path.display()))
+        HexSource::open(path).map_err(|err| {
+            let (path, err) = (path.display().to_string(), format!("{err}."));
+            LiveText::new(move || trf("Can't open {}: {}", &[&path, &err]))
+        })
     };
     Ok(HexPair {
         left: open(left)?,
@@ -211,8 +217,8 @@ pub struct HexView {
     diff: Option<HexDiff>,
     /// Navigation stops: the ranges with close ones merged (R6).
     blocks: Vec<Range<u64>>,
-    message: Option<SharedString>,
-    message_hint: Option<SharedString>,
+    message: Option<LiveText>,
+    message_hint: Option<LiveText>,
     job: JobSlot,
     task: Option<Task<()>>,
     /// Redraws the status line's percentage while comparing.
@@ -331,7 +337,7 @@ impl HexView {
             .and_then(|path| settings::get_u64(&path, BYTES_PER_ROW_KEY))
             .filter(|bpr| BYTES_PER_ROW.contains(bpr))
             .unwrap_or(DEFAULT_BYTES_PER_ROW);
-        let goto = cx.new(|cx| InputState::new(window, cx).placeholder("Offset, e.g. 0x1F40"));
+        let goto = cx.new(|cx| InputState::new(window, cx).placeholder(tr("Offset, e.g. 0x1F40")));
         let _goto_subscription = cx.subscribe_in(
             &goto,
             window,
@@ -529,7 +535,7 @@ impl HexView {
     fn opened(
         &mut self,
         generation: u64,
-        opened: Result<Arc<HexPair>, String>,
+        opened: Result<Arc<HexPair>, LiveText>,
         cx: &mut Context<Self>,
     ) -> Option<Arc<HexPair>> {
         if !self.job.is_current(generation) {
@@ -542,11 +548,13 @@ impl HexView {
                 self.restore_carry(&pair);
                 Some(pair)
             }
-            Err(message) => {
+            Err(mut message) => {
                 self.carry = None;
                 self.job.finish(generation);
-                self.message = Some(message.into());
-                self.message_hint = Some(OPEN_HINT.into());
+                // Built on the job's thread: said again here, in the language now in force.
+                message.relabel();
+                self.message = Some(message);
+                self.message_hint = Some(live(OPEN_HINT));
                 None
             }
         }
@@ -851,12 +859,12 @@ impl HexView {
         self.task = None;
         self.pending_goto = None;
         self.cancelled = true;
-        if self.notice.as_deref() == Some(STILL_COMPARING) {
-            self.notice = Some(CANCELLED.into());
+        if self.notice.as_deref() == Some(tr(STILL_COMPARING)) {
+            self.notice = Some(tr(CANCELLED).into());
         }
         if self.pair.is_none() {
-            self.message = Some("Cancelled: the files were not opened.".into());
-            self.message_hint = Some(OPEN_HINT.into());
+            self.message = Some(live("Cancelled: the files were not opened."));
+            self.message_hint = Some(live(OPEN_HINT));
         }
         cx.notify();
     }
@@ -919,6 +927,24 @@ impl HexView {
         self.cursor
     }
 
+    /// The language changed: a notice is one-shot feedback in the old language, so it goes and the
+    /// status falls back to what it works out. What else is stored is said again: the failed
+    /// open's message and hint, and the placeholders of the go-to field and the find field.
+    pub fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.notice = None;
+        for text in [&mut self.message, &mut self.message_hint]
+            .into_iter()
+            .flatten()
+        {
+            text.relabel();
+        }
+        self.goto.update(cx, |state, cx| {
+            state.set_placeholder(tr("Offset, e.g. 0x1F40"), window, cx)
+        });
+        self.relabel_find(window, cx);
+        cx.notify();
+    }
+
     pub fn notice(&self) -> Option<&str> {
         self.notice.as_deref()
     }
@@ -975,8 +1001,8 @@ impl HexView {
         if !self.row_shown(file_row) {
             self.set_only_differences(false, cx);
             notice = Some(match notice {
-                Some(earlier) => format!("{earlier} {SHOWING_ALL}").into(),
-                None => SHOWING_ALL.into(),
+                Some(earlier) => format!("{earlier} {}", tr(SHOWING_ALL)).into(),
+                None => tr(SHOWING_ALL).into(),
             });
         }
         let row = self.display_row(file_row).unwrap_or(0);
@@ -991,11 +1017,11 @@ impl HexView {
             // Nothing to walk to: the compare is running or was cancelled, the files did not
             // open, or they have no differences.
             if self.is_busy() {
-                self.notice = Some(STILL_COMPARING.into());
+                self.notice = Some(tr(STILL_COMPARING).into());
             } else if self.cancelled {
-                self.notice = Some(CANCELLED.into());
+                self.notice = Some(tr(CANCELLED).into());
             } else if self.diff.is_some() {
-                self.notice = Some(NO_MORE.into());
+                self.notice = Some(tr(NO_MORE).into());
             }
             cx.notify();
             return;
@@ -1027,7 +1053,7 @@ impl HexView {
                 self.move_cursor(start, cx);
                 self.current_block = Some(i);
             }
-            None => self.notice = Some(NO_MORE.into()),
+            None => self.notice = Some(tr(NO_MORE).into()),
         }
         cx.notify();
     }
@@ -1046,17 +1072,17 @@ impl HexView {
             return false;
         };
         let Some(offset) = parse_offset(text) else {
-            self.notice = Some(BAD_OFFSET.into());
+            self.notice = Some(tr(BAD_OFFSET).into());
             cx.notify();
             return false;
         };
         if max_len == 0 {
-            self.notice = Some("There are no bytes to go to.".into());
+            self.notice = Some(tr("There are no bytes to go to.").into());
             cx.notify();
             return false;
         }
         let clamped = offset.min(max_len - 1);
-        self.notice = (clamped != offset).then(|| PAST_END.into());
+        self.notice = (clamped != offset).then(|| tr(PAST_END).into());
         self.move_cursor(clamped, cx);
         true
     }
@@ -1082,14 +1108,14 @@ impl Render for HexView {
                         .id("hex-message-title")
                         .test_support()
                         .text_size(px(15.))
-                        .child(title),
+                        .prose(SharedString::from(&title)),
                 )
                 .children(self.message_hint.clone().map(|hint| {
                     div()
                         .id("hex-message-hint")
                         .test_support()
                         .text_color(palette.muted)
-                        .child(hint)
+                        .prose(SharedString::from(&hint))
                 }))
                 .into_any_element(),
             (None, Some(pair)) if !self.awaiting_ranges() && !self.ranges_cancelled() => self
@@ -1099,9 +1125,9 @@ impl Render for HexView {
             // rows to show, and the top row is not clamped, so the top byte comes back.
             (None, _) => {
                 let text = if self.ranges_cancelled() {
-                    CANCELLED
+                    tr(CANCELLED)
                 } else {
-                    "Comparing…"
+                    tr("Comparing…")
                 };
                 v_flex()
                     .id("hex-placeholder")
