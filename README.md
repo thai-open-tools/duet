@@ -34,6 +34,12 @@
 
 <br>
 
+<p align="center"><b>▶ See duet compare in two minutes</b></p>
+
+https://github.com/user-attachments/assets/a1445a21-14ca-4229-a082-def5ce4bcb8b
+
+<br>
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/text-dark.png">

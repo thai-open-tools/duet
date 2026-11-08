@@ -33,6 +33,12 @@
 
 <br>
 
+<p align="center"><b>▶ ดู duet compare ใน 2 นาที</b></p>
+
+https://github.com/user-attachments/assets/721f9903-f49b-4d2a-b90e-5ab6c35993e3
+
+<br>
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/text-dark.png">
